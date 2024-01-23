@@ -6,6 +6,16 @@
 
 #-----------------------------------------------
 
+#-----------------------------------------------
+# Modify CFLAGS to ignore unused but set variable
+# For more details, plz refer to https://github.com/ctripcorp/Redis-On-Rocks/pull/255
+
+# -Wno-unused-but-set-variable: meaning do not report warning when meeting unused but set variable
+# -Wno-error: meaning do not report error when meeting warnings
+CFLAGS += -Wno-unused-but-set-variable -Wno-error
+ROCKSDB_CFLAGS = $(CFLAGS)
+#-----------------------------------------------
+
 BASH_EXISTS := $(shell which bash)
 SHELL := $(shell which bash)
 include common.mk
