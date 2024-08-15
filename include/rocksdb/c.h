@@ -2353,6 +2353,14 @@ extern ROCKSDB_LIBRARY_API char* rocksdb_sst_file_metadata_get_smallestkey(
 extern ROCKSDB_LIBRARY_API char* rocksdb_sst_file_metadata_get_largestkey(
     rocksdb_sst_file_metadata_t* file_meta, size_t* len);
 
+/**
+ * Returns the create time of the specified sst file.
+ *
+ * @param file_meta the metadata of an SST file to obtain its create time.
+ */
+extern ROCKSDB_LIBRARY_API uint64_t rocksdb_sst_file_metadata_get_file_creation_time(
+    rocksdb_sst_file_metadata_t* file_meta);
+
 /* Transactions */
 
 extern ROCKSDB_LIBRARY_API rocksdb_column_family_handle_t*

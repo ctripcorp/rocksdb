@@ -5388,6 +5388,11 @@ char* rocksdb_sst_file_metadata_get_largestkey(
   return CopyString(file_meta->rep->largestkey);
 }
 
+uint64_t rocksdb_sst_file_metadata_get_file_creation_time(
+    rocksdb_sst_file_metadata_t* file_meta) {
+  return file_meta->rep->file_creation_time;
+}
+
 /* Transactions */
 
 rocksdb_transactiondb_options_t* rocksdb_transactiondb_options_create() {
