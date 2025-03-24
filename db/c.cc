@@ -4537,6 +4537,15 @@ void rocksdb_readoptions_set_timestamp(rocksdb_readoptions_t* opt,
   }
 }
 
+void rocksdb_readoptions_set_async_io(rocksdb_readoptions_t* opt,
+                                      unsigned char v) {
+  opt->rep.async_io = v;
+}
+
+unsigned char rocksdb_readoptions_get_async_io(rocksdb_readoptions_t* opt) {
+  return opt->rep.async_io;
+}
+
 void rocksdb_readoptions_set_iter_start_ts(rocksdb_readoptions_t* opt,
                                            const char* ts, size_t tslen) {
   if (ts == nullptr) {
