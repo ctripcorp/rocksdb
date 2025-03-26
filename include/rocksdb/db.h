@@ -781,6 +781,48 @@ class DB {
       values++;
     }
   }
+  // Consistent Get of many keys across column families without the need
+  // for an explicit snapshot. The main difference between this set of
+  // MultiGet APis and the batched MultiGet APIs that follow are -
+  // 1. The APIs take std::vector instead of C style array pointers
+  // 2. Values are returned as std::string rather than PinnableSlice
+  //
+  // If keys[i] does not exist in the database, then the i'th returned
+  // status will be one for which Status::IsNotFound() is true, and
+  // (*values)[i] will be set to some arbitrary value (often ""). Otherwise,
+  // the i'th returned status will have Status::ok() true, and (*values)[i]
+  // will store the value associated with keys[i].
+  //
+  // (*values) will always be resized to be the same size as (keys).
+  // Similarly, the number of returned statuses will be the number of keys.
+  // If timestamps is non-null, the vector pointed to by it will be resized to
+  // number of keys and filled with timestamps of the keys on return.
+  // Note: keys will not be "de-duplicated". Duplicate keys will return
+  // duplicate values in order, and may return different status values
+  // in case there are errors.
+  // NOTE: virtual final => disallow override (was previously allowed)
+  virtual std::vector<Status> MultiGetByAsyncIO(
+      const ReadOptions& options,
+      const std::vector<ColumnFamilyHandle*>& column_families,
+      const std::vector<Slice>& keys, std::vector<std::string>* values) final {
+    size_t num_keys = keys.size();
+    std::vector<Status> statuses(num_keys);
+    std::vector<PinnableSlice> pin_values(num_keys);
+
+    values->resize(num_keys);
+    MultiGet(options, num_keys,
+             const_cast<ColumnFamilyHandle**>(column_families.data()),
+             keys.data(), pin_values.data(),
+             nullptr,
+             statuses.data(),
+             /*sorted_input=*/false);
+    for (size_t i = 0; i < num_keys; ++i) {
+      if (statuses[i].ok()) {
+        (*values)[i].assign(pin_values[i].data(), pin_values[i].size());
+      }
+    }
+    return statuses;
+  }
 
   // Batched MultiGet-like API that returns wide-column entities from a single
   // column family. For any given "key[i]" in "keys" (where 0 <= "i" <
