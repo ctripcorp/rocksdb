@@ -812,9 +812,7 @@ class DB {
     values->resize(num_keys);
     MultiGet(options, num_keys,
              const_cast<ColumnFamilyHandle**>(column_families.data()),
-             keys.data(), pin_values.data(),
-             nullptr,
-             statuses.data(),
+             keys.data(), pin_values.data(), nullptr, statuses.data(),
              /*sorted_input=*/false);
     for (size_t i = 0; i < num_keys; ++i) {
       if (statuses[i].ok()) {
