@@ -97,3 +97,6 @@ cmake-build-*
 third-party/folly/
 .cache
 *.sublime-*
+_build_folly/extracted/
+_build_folly/installed/
+third-party/folly-*
