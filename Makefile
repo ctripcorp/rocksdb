@@ -2428,33 +2428,34 @@ checkout_folly:
 	if [ -e third-party/folly ]; then \
 		cd third-party/folly && ${GIT_COMMAND} fetch origin; \
 	else \
-		cd third-party && ${GIT_COMMAND} clone https://github.com/facebook/folly.git; \
+		cp ./_build_folly/downloads/folly-20c7c8d18.tar.gz ./third-party && cd third-party && tar -xzvf folly-20c7c8d18.tar.gz; \
 	fi
 	@# Pin to a particular version for public CI, so that PR authors don't
 	@# need to worry about folly breaking our integration. Update periodically
-	cd third-party/folly && git reset --hard beacd86d63cd71c904632262e6c36f60874d78ba
+	cd third-party/folly && git reset --hard 20c7c8d183991f1494dbe254004b929ed33ca9f2
 	@# A hack to remove boost dependency.
 	@# NOTE: this hack is only needed if building using USE_FOLLY_LITE
-	perl -pi -e 's/^(#include <boost)/\/\/$$1/' third-party/folly/folly/functional/Invoke.h
+	#perl -pi -e 's/^(#include <boost)/\/\/$$1/' third-party/folly/folly/functional/Invoke.h
 	@# NOTE: this hack is required for clang in some cases
-	perl -pi -e 's/int rv = syscall/int rv = (int)syscall/' third-party/folly/folly/detail/Futex.cpp
+	#perl -pi -e 's/int rv = syscall/int rv = (int)syscall/' third-party/folly/folly/detail/Futex.cpp
 	@# NOTE: this hack is required for gcc in some cases
 	perl -pi -e 's/(__has_include.<experimental.memory_resource>.)/__cpp_rtti && $$1/' third-party/folly/folly/memory/MemoryResource.h
+	cd ./_build_folly/downloads && cat boost-boost_1_78_0.tar.gz-* > boost-boost_1_78_0.tar.gz 
 
 CXX_M_FLAGS = $(filter -m%, $(CXXFLAGS))
 
 build_folly:
-	FOLLY_INST_PATH=`cd third-party/folly; $(PYTHON) build/fbcode_builder/getdeps.py show-inst-dir`; \
+	FOLLY_INST_PATH=`cd third-party/folly; $(PYTHON) build/fbcode_builder/getdeps.py --scratch-path ../../_build_folly show-inst-dir`; \
 	if [ "$$FOLLY_INST_PATH" ]; then \
-		rm -rf $${FOLLY_INST_PATH}/../../*; \
+		rm -rf $${FOLLY_INST_PATH}/../../build $${FOLLY_INST_PATH}/../../extracted $${FOLLY_INST_PATH}/../../installed $${FOLLY_INST_PATH}/../../build; \
 	else \
 		echo "Please run checkout_folly first"; \
 		false; \
 	fi
 	# Restore the original version of Invoke.h with boost dependency
-	cd third-party/folly && ${GIT_COMMAND} checkout folly/functional/Invoke.h
+	#cd third-party/folly && ${GIT_COMMAND} checkout folly/functional/Invoke.h
 	cd third-party/folly && \
-		CXXFLAGS=" $(CXX_M_FLAGS) -DHAVE_CXX11_ATOMIC " $(PYTHON) build/fbcode_builder/getdeps.py build --no-tests
+		CXXFLAGS=" $(CXX_M_FLAGS) -DHAVE_CXX11_ATOMIC " $(PYTHON) build/fbcode_builder/getdeps.py --scratch-path ../../_build_folly build --no-tests
 
 # ---------------------------------------------------------------------------
 #   Build size testing
