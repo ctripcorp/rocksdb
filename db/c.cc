@@ -52,6 +52,7 @@ using ROCKSDB_NAMESPACE::BackupEngineOptions;
 using ROCKSDB_NAMESPACE::BackupID;
 using ROCKSDB_NAMESPACE::BackupInfo;
 using ROCKSDB_NAMESPACE::BatchResult;
+using ROCKSDB_NAMESPACE::BlobMetaData;
 using ROCKSDB_NAMESPACE::BlockBasedTableOptions;
 using ROCKSDB_NAMESPACE::BottommostLevelCompaction;
 using ROCKSDB_NAMESPACE::BytewiseComparator;
@@ -232,6 +233,9 @@ struct rocksdb_level_metadata_t {
 struct rocksdb_sst_file_metadata_t {
   const SstFileMetaData* rep;
 };
+struct rocksdb_blob_metadata_t {
+  const BlobMetaData* rep;
+};
 struct rocksdb_envoptions_t {
   EnvOptions rep;
 };
@@ -289,6 +293,11 @@ struct rocksdb_compactionfilter_t : public CompactionFilter {
   const char* (*name_)(void*);
   unsigned char ignore_snapshots_;
 
+  int (*filter_blob_by_key_)(void*, int level, const char* key,
+                             size_t key_length, char** new_value,
+                             size_t* new_value_length, char** skip_until,
+                             size_t* skip_until_length);
+
   ~rocksdb_compactionfilter_t() override { (*destructor_)(state_); }
 
   bool Filter(int level, const Slice& key, const Slice& existing_value,
@@ -305,6 +314,48 @@ struct rocksdb_compactionfilter_t : public CompactionFilter {
       *value_changed = true;
     }
     return result;
+  }
+
+  Decision FilterBlobByKey(int level, const Slice& key, std::string* new_value,
+                           std::string* skip_until) const override {
+    if (!filter_blob_by_key_) return Decision::kUndetermined;
+
+    char* c_new_value = nullptr;
+    size_t new_value_length = 0;
+    char* c_skip_until = nullptr;
+    size_t skip_until_length = 0;
+    const int decision = (*filter_blob_by_key_)(
+        state_, level, key.data(), key.size(), &c_new_value, &new_value_length,
+        &c_skip_until, &skip_until_length);
+    switch (decision) {
+      case 0:
+        return Decision::kKeep;
+      case 1:
+        return Decision::kRemove;
+      case 2:
+        if (c_new_value != nullptr) {
+          new_value->assign(c_new_value, new_value_length);
+        }
+        return Decision::kChangeValue;
+      case 3:
+        if (c_skip_until != nullptr) {
+          skip_until->assign(c_skip_until, skip_until_length);
+        }
+        return Decision::kRemoveAndSkipUntil;
+      case 4:
+        return Decision::kChangeBlobIndex;
+      case 5:
+        return Decision::kIOError;
+      case 6:
+        return Decision::kPurge;
+      case 7:
+        return Decision::kChangeWideColumnEntity;
+      case 8:
+        return Decision::kUndetermined;
+      default:
+        assert(0);
+        return Decision::kUndetermined;
+    }
   }
 
   const char* Name() const override { return (*name_)(state_); }
@@ -4153,7 +4204,17 @@ rocksdb_compactionfilter_t* rocksdb_compactionfilter_create(
   result->filter_ = filter;
   result->ignore_snapshots_ = true;
   result->name_ = name;
+  result->filter_blob_by_key_ = nullptr;
   return result;
+}
+
+void rocksdb_compactionfilter_set_filter_blob_by_key(
+    rocksdb_compactionfilter_t* filter,
+    int (*filter_blob_by_key)(void* state, int level, const char* key,
+                              size_t key_length, char** new_value,
+                              size_t* new_value_length, char** skip_until,
+                              size_t* skip_until_length)) {
+  filter->filter_blob_by_key_ = filter_blob_by_key;
 }
 
 void rocksdb_compactionfilter_set_ignore_snapshots(
@@ -5430,6 +5491,66 @@ char* rocksdb_sst_file_metadata_get_largestkey(
 uint64_t rocksdb_sst_file_metadata_get_file_creation_time(
     rocksdb_sst_file_metadata_t* file_meta) {
   return file_meta->rep->file_creation_time;
+}
+
+uint64_t rocksdb_sst_file_metadata_get_oldest_blob_file_number(
+    rocksdb_sst_file_metadata_t* file_meta) {
+  return file_meta->rep->oldest_blob_file_number;
+}
+
+size_t rocksdb_column_family_metadata_get_blob_file_count(
+    rocksdb_column_family_metadata_t* cf_meta) {
+  return cf_meta->rep.blob_files.size();
+}
+
+uint64_t rocksdb_column_family_metadata_get_blob_file_size(
+    rocksdb_column_family_metadata_t* cf_meta) {
+  return cf_meta->rep.blob_file_size;
+}
+
+rocksdb_blob_metadata_t* rocksdb_column_family_metadata_get_blob_metadata(
+    rocksdb_column_family_metadata_t* cf_meta, size_t i) {
+  if (i >= cf_meta->rep.blob_files.size()) {
+    return nullptr;
+  }
+  rocksdb_blob_metadata_t* blob_meta =
+      (rocksdb_blob_metadata_t*)malloc(sizeof(rocksdb_blob_metadata_t));
+  blob_meta->rep = &cf_meta->rep.blob_files[i];
+  return blob_meta;
+}
+
+void rocksdb_blob_metadata_destroy(rocksdb_blob_metadata_t* blob_meta) {
+  free(blob_meta);
+}
+
+uint64_t rocksdb_blob_metadata_get_blob_file_number(
+    rocksdb_blob_metadata_t* blob_meta) {
+  return blob_meta->rep->blob_file_number;
+}
+
+uint64_t rocksdb_blob_metadata_get_blob_file_size(
+    rocksdb_blob_metadata_t* blob_meta) {
+  return blob_meta->rep->blob_file_size;
+}
+
+uint64_t rocksdb_blob_metadata_get_total_blob_count(
+    rocksdb_blob_metadata_t* blob_meta) {
+  return blob_meta->rep->total_blob_count;
+}
+
+uint64_t rocksdb_blob_metadata_get_total_blob_bytes(
+    rocksdb_blob_metadata_t* blob_meta) {
+  return blob_meta->rep->total_blob_bytes;
+}
+
+uint64_t rocksdb_blob_metadata_get_garbage_blob_count(
+    rocksdb_blob_metadata_t* blob_meta) {
+  return blob_meta->rep->garbage_blob_count;
+}
+
+uint64_t rocksdb_blob_metadata_get_garbage_blob_bytes(
+    rocksdb_blob_metadata_t* blob_meta) {
+  return blob_meta->rep->garbage_blob_bytes;
 }
 
 /* Transactions */
