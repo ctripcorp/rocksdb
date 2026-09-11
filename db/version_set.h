@@ -237,6 +237,19 @@ class VersionStorageInfo {
       double blob_garbage_collection_age_cutoff,
       double blob_garbage_collection_force_threshold);
 
+  // Computes and caches overall_blob_garbage_ratio_ from blob_files_. No-op if
+  // already cached. Uses 0 when blob_files_ is empty.
+  //
+  // REQUIRES: DB mutex held
+  void ComputeOverallBlobGarbageRatio();
+
+  // List-based forced blob GC using per-SST blob_file_set and blob
+  // FullLinkedSsts. Computes files_marked_for_forced_blob_gc_.
+  //
+  // REQUIRES: DB mutex held
+  void ComputeFilesMarkedForForceBlobListGC(
+      const MutableCFOptions& mutable_cf_options);
+
   bool level0_non_overlapping() const { return level0_non_overlapping_; }
 
   // Updates the oldest snapshot and related internal state, like the bottommost
@@ -500,6 +513,13 @@ class VersionStorageInfo {
     return files_marked_for_forced_blob_gc_;
   }
 
+  // Overall blob garbage ratio in [0, 1] (garbage bytes / file bytes). Cached
+  // on this Version snapshot by ComputeOverallBlobGarbageRatio(); empty if not
+  // computed yet.
+  const std::optional<double>& OverallBlobGarbageRatio() const {
+    return overall_blob_garbage_ratio_;
+  }
+
   int base_level() const { return base_level_; }
   double level_multiplier() const { return level_multiplier_; }
 
@@ -701,6 +721,10 @@ class VersionStorageInfo {
       bottommost_files_marked_for_compaction_;
 
   autovector<std::pair<int, FileMetaData*>> files_marked_for_forced_blob_gc_;
+
+  // Cached overall blob garbage ratio; recomputed only once per Version
+  // snapshot.
+  std::optional<double> overall_blob_garbage_ratio_;
 
   // Threshold for needing to mark another bottommost file. Maintain it so we
   // can quickly check when releasing a snapshot whether more bottommost files

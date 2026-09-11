@@ -423,6 +423,9 @@ void CheckBlobMetaData(rocksdb_column_family_metadata_t* cf_meta) {
     assert(rocksdb_blob_metadata_get_garbage_blob_bytes(blob_meta) <=
            total_blob_bytes);
 
+    assert(rocksdb_blob_metadata_get_full_linked_ssts_count(blob_meta) >=
+           rocksdb_blob_metadata_get_linked_ssts_count(blob_meta));
+
     rocksdb_blob_metadata_destroy(blob_meta);
   }
   assert(rocksdb_column_family_metadata_get_blob_file_size(cf_meta) ==
@@ -445,6 +448,8 @@ void CheckBlobMetaData(rocksdb_column_family_metadata_t* cf_meta) {
       if (rocksdb_sst_file_metadata_get_oldest_blob_file_number(file_meta) !=
           0) {
         blob_referencing_files++;
+        assert(rocksdb_sst_file_metadata_get_blob_file_set_count(file_meta) >
+               0);
       }
       rocksdb_sst_file_metadata_destroy(file_meta);
     }
@@ -1587,6 +1592,7 @@ int main(int argc, char** argv) {
     rocksdb_options_set_create_if_missing(options_with_blob, 1);
     rocksdb_options_set_enable_blob_files(options_with_blob, 1);
     rocksdb_options_set_min_blob_size(options_with_blob, 0);
+    rocksdb_options_set_enable_blob_file_set_record(options_with_blob, 1);
     // Create new database
     rocksdb_close(db);
     rocksdb_destroy_db(options_with_blob, dbname, &err);
@@ -2291,6 +2297,59 @@ int main(int argc, char** argv) {
 
     rocksdb_options_set_prepopulate_blob_cache(o, 1 /* flush only */);
     CheckCondition(1 == rocksdb_options_get_prepopulate_blob_cache(o));
+
+    rocksdb_options_set_enable_blob_file_set_record(o, 1);
+    CheckCondition(1 == rocksdb_options_get_enable_blob_file_set_record(o));
+
+    rocksdb_options_set_enable_blob_list_gc(o, 1);
+    CheckCondition(1 == rocksdb_options_get_enable_blob_list_gc(o));
+
+    rocksdb_options_set_blob_list_gc_overall_garbage_ratio_low(o, 0.1);
+    CheckCondition(
+        0.1 == rocksdb_options_get_blob_list_gc_overall_garbage_ratio_low(o));
+
+    rocksdb_options_set_blob_list_gc_overall_garbage_ratio_middle(o, 0.2);
+    CheckCondition(
+        0.2 ==
+        rocksdb_options_get_blob_list_gc_overall_garbage_ratio_middle(o));
+
+    rocksdb_options_set_blob_list_gc_overall_gc_garbage_ratio_high(o, 0.3);
+    CheckCondition(
+        0.3 ==
+        rocksdb_options_get_blob_list_gc_overall_gc_garbage_ratio_high(o));
+
+    rocksdb_options_set_blob_list_gc_gc_garbage_ratio(o, 0.4);
+    CheckCondition(0.4 == rocksdb_options_get_blob_list_gc_gc_garbage_ratio(o));
+
+    rocksdb_options_set_blob_list_gc_hard_gc_garbage_ratio(o, 0.5);
+    CheckCondition(0.5 ==
+                   rocksdb_options_get_blob_list_gc_hard_gc_garbage_ratio(o));
+
+    rocksdb_options_set_blob_list_gc_max_blob_candidate_per_round(o, 20);
+    CheckCondition(
+        20 == rocksdb_options_get_blob_list_gc_max_blob_candidate_per_round(o));
+
+    rocksdb_options_set_blob_list_gc_max_blob_per_compaction(o, 21);
+    CheckCondition(21 ==
+                   rocksdb_options_get_blob_list_gc_max_blob_per_compaction(o));
+
+    rocksdb_options_set_blob_list_gc_max_sst_candidate_per_round(o, 30);
+    CheckCondition(
+        30 == rocksdb_options_get_blob_list_gc_max_sst_candidate_per_round(o));
+
+    rocksdb_options_set_blob_list_gc_sst_rewrite_garbage_bytes_ratio_threshold(
+        o, 0.8);
+    CheckCondition(
+        0.8 ==
+        rocksdb_options_get_blob_list_gc_sst_rewrite_garbage_bytes_ratio_threshold(
+            o));
+
+    rocksdb_options_set_blob_list_gc_hard_sst_rewrite_garbage_bytes_ratio_threshold(
+        o, 0.9);
+    CheckCondition(
+        0.9 ==
+        rocksdb_options_get_blob_list_gc_hard_sst_rewrite_garbage_bytes_ratio_threshold(
+            o));
 
     // Create a copy that should be equal to the original.
     rocksdb_options_t* copy;

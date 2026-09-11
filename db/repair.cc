@@ -604,6 +604,8 @@ class Repairer {
           /*allow_unprepared_value=*/false,
           cfd->GetLatestMutableCFOptions()->block_protection_bytes_per_key);
       ParsedInternalKey parsed;
+      const bool record_blob_file_set =
+          cfd->GetLatestMutableCFOptions()->enable_blob_file_set_record;
       for (iter->SeekToFirst(); iter->Valid(); iter->Next()) {
         Slice key = iter->key();
         Status pik_status =
@@ -618,7 +620,7 @@ class Repairer {
         counter++;
 
         status = t->meta.UpdateBoundaries(key, iter->value(), parsed.sequence,
-                                          parsed.type);
+                                          parsed.type, record_blob_file_set);
         if (!status.ok()) {
           break;
         }
@@ -706,7 +708,8 @@ class Repairer {
             table->meta.epoch_number, table->meta.file_checksum,
             table->meta.file_checksum_func_name, table->meta.unique_id,
             table->meta.compensated_range_deletion_size, table->meta.tail_size,
-            table->meta.user_defined_timestamps_persisted);
+            table->meta.user_defined_timestamps_persisted,
+            table->meta.blob_file_set);
       }
       s = dummy_version_builder.Apply(&dummy_edit);
       if (s.ok()) {

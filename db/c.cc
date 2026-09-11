@@ -3161,6 +3161,129 @@ double rocksdb_options_get_blob_gc_force_threshold(rocksdb_options_t* opt) {
   return opt->rep.blob_garbage_collection_force_threshold;
 }
 
+void rocksdb_options_set_enable_blob_file_set_record(rocksdb_options_t* opt,
+                                                     unsigned char val) {
+  opt->rep.enable_blob_file_set_record = val;
+}
+
+unsigned char rocksdb_options_get_enable_blob_file_set_record(
+    rocksdb_options_t* opt) {
+  return opt->rep.enable_blob_file_set_record;
+}
+
+void rocksdb_options_set_enable_blob_list_gc(rocksdb_options_t* opt,
+                                             unsigned char val) {
+  opt->rep.enable_blob_list_garbage_collection = val;
+}
+
+unsigned char rocksdb_options_get_enable_blob_list_gc(rocksdb_options_t* opt) {
+  return opt->rep.enable_blob_list_garbage_collection;
+}
+
+void rocksdb_options_set_blob_list_gc_overall_garbage_ratio_low(
+    rocksdb_options_t* opt, double val) {
+  opt->rep.blob_list_garbage_overall_garbage_ratio_low = val;
+}
+
+double rocksdb_options_get_blob_list_gc_overall_garbage_ratio_low(
+    rocksdb_options_t* opt) {
+  return opt->rep.blob_list_garbage_overall_garbage_ratio_low;
+}
+
+void rocksdb_options_set_blob_list_gc_overall_garbage_ratio_middle(
+    rocksdb_options_t* opt, double val) {
+  opt->rep.blob_list_garbage_overall_garbage_ratio_middle = val;
+}
+
+double rocksdb_options_get_blob_list_gc_overall_garbage_ratio_middle(
+    rocksdb_options_t* opt) {
+  return opt->rep.blob_list_garbage_overall_garbage_ratio_middle;
+}
+
+void rocksdb_options_set_blob_list_gc_overall_gc_garbage_ratio_high(
+    rocksdb_options_t* opt, double val) {
+  opt->rep.blob_list_garbage_overall_gc_garbage_ratio_high = val;
+}
+
+double rocksdb_options_get_blob_list_gc_overall_gc_garbage_ratio_high(
+    rocksdb_options_t* opt) {
+  return opt->rep.blob_list_garbage_overall_gc_garbage_ratio_high;
+}
+
+void rocksdb_options_set_blob_list_gc_gc_garbage_ratio(rocksdb_options_t* opt,
+                                                       double val) {
+  opt->rep.blob_list_garbage_gc_garbage_ratio = val;
+}
+
+double rocksdb_options_get_blob_list_gc_gc_garbage_ratio(
+    rocksdb_options_t* opt) {
+  return opt->rep.blob_list_garbage_gc_garbage_ratio;
+}
+
+void rocksdb_options_set_blob_list_gc_hard_gc_garbage_ratio(
+    rocksdb_options_t* opt, double val) {
+  opt->rep.blob_list_garbage_hard_gc_garbage_ratio = val;
+}
+
+double rocksdb_options_get_blob_list_gc_hard_gc_garbage_ratio(
+    rocksdb_options_t* opt) {
+  return opt->rep.blob_list_garbage_hard_gc_garbage_ratio;
+}
+
+void rocksdb_options_set_blob_list_gc_max_blob_candidate_per_round(
+    rocksdb_options_t* opt, uint32_t val) {
+  opt->rep.blob_list_garbage_max_blob_candidate_per_round = val;
+}
+
+uint32_t rocksdb_options_get_blob_list_gc_max_blob_candidate_per_round(
+    rocksdb_options_t* opt) {
+  return opt->rep.blob_list_garbage_max_blob_candidate_per_round;
+}
+
+void rocksdb_options_set_blob_list_gc_max_blob_per_compaction(
+    rocksdb_options_t* opt, uint32_t val) {
+  opt->rep.blob_list_garbage_max_blob_per_compaction = val;
+}
+
+uint32_t rocksdb_options_get_blob_list_gc_max_blob_per_compaction(
+    rocksdb_options_t* opt) {
+  return opt->rep.blob_list_garbage_max_blob_per_compaction;
+}
+
+void rocksdb_options_set_blob_list_gc_max_sst_candidate_per_round(
+    rocksdb_options_t* opt, uint32_t val) {
+  opt->rep.blob_list_garbage_max_sst_candidate_per_round = val;
+}
+
+uint32_t rocksdb_options_get_blob_list_gc_max_sst_candidate_per_round(
+    rocksdb_options_t* opt) {
+  return opt->rep.blob_list_garbage_max_sst_candidate_per_round;
+}
+
+void rocksdb_options_set_blob_list_gc_sst_rewrite_garbage_bytes_ratio_threshold(
+    rocksdb_options_t* opt, double val) {
+  opt->rep.blob_list_garbage_sst_rewrite_garbage_bytes_ratio_threshold = val;
+}
+
+double
+rocksdb_options_get_blob_list_gc_sst_rewrite_garbage_bytes_ratio_threshold(
+    rocksdb_options_t* opt) {
+  return opt->rep.blob_list_garbage_sst_rewrite_garbage_bytes_ratio_threshold;
+}
+
+void rocksdb_options_set_blob_list_gc_hard_sst_rewrite_garbage_bytes_ratio_threshold(
+    rocksdb_options_t* opt, double val) {
+  opt->rep.blob_list_garbage_hard_sst_rewrite_garbage_bytes_ratio_threshold =
+      val;
+}
+
+double
+rocksdb_options_get_blob_list_gc_hard_sst_rewrite_garbage_bytes_ratio_threshold(
+    rocksdb_options_t* opt) {
+  return opt->rep
+      .blob_list_garbage_hard_sst_rewrite_garbage_bytes_ratio_threshold;
+}
+
 void rocksdb_options_set_blob_compaction_readahead_size(rocksdb_options_t* opt,
                                                         uint64_t val) {
   opt->rep.blob_compaction_readahead_size = val;
@@ -5498,6 +5621,11 @@ uint64_t rocksdb_sst_file_metadata_get_oldest_blob_file_number(
   return file_meta->rep->oldest_blob_file_number;
 }
 
+size_t rocksdb_sst_file_metadata_get_blob_file_set_count(
+    rocksdb_sst_file_metadata_t* file_meta) {
+  return file_meta->rep->blob_file_set_count;
+}
+
 size_t rocksdb_column_family_metadata_get_blob_file_count(
     rocksdb_column_family_metadata_t* cf_meta) {
   return cf_meta->rep.blob_files.size();
@@ -5551,6 +5679,16 @@ uint64_t rocksdb_blob_metadata_get_garbage_blob_count(
 uint64_t rocksdb_blob_metadata_get_garbage_blob_bytes(
     rocksdb_blob_metadata_t* blob_meta) {
   return blob_meta->rep->garbage_blob_bytes;
+}
+
+uint64_t rocksdb_blob_metadata_get_linked_ssts_count(
+    rocksdb_blob_metadata_t* blob_meta) {
+  return blob_meta->rep->linked_ssts_count;
+}
+
+uint64_t rocksdb_blob_metadata_get_full_linked_ssts_count(
+    rocksdb_blob_metadata_t* blob_meta) {
+  return blob_meta->rep->full_linked_ssts_count;
 }
 
 /* Transactions */
