@@ -89,6 +89,8 @@ Status BuildTable(
       /*enable_hash=*/paranoid_file_checks);
   Status s;
   meta->fd.file_size = 0;
+  const bool record_blob_file_set =
+      mutable_cf_options.enable_blob_file_set_record;
   iter->SeekToFirst();
   std::unique_ptr<CompactionRangeDelAggregator> range_del_agg(
       new CompactionRangeDelAggregator(&tboptions.internal_comparator,
@@ -237,7 +239,7 @@ Status BuildTable(
       builder->Add(key_after_flush, value);
 
       s = meta->UpdateBoundaries(key_after_flush, value, ikey.sequence,
-                                 ikey.type);
+                                 ikey.type, record_blob_file_set);
       if (!s.ok()) {
         break;
       }
