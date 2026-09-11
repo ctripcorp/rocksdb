@@ -1301,6 +1301,84 @@ extern ROCKSDB_LIBRARY_API void rocksdb_options_set_blob_gc_force_threshold(
 extern ROCKSDB_LIBRARY_API double rocksdb_options_get_blob_gc_force_threshold(
     rocksdb_options_t* opt);
 
+extern ROCKSDB_LIBRARY_API void rocksdb_options_set_enable_blob_file_set_record(
+    rocksdb_options_t* opt, unsigned char val);
+extern ROCKSDB_LIBRARY_API unsigned char
+rocksdb_options_get_enable_blob_file_set_record(rocksdb_options_t* opt);
+
+extern ROCKSDB_LIBRARY_API void rocksdb_options_set_enable_blob_list_gc(
+    rocksdb_options_t* opt, unsigned char val);
+extern ROCKSDB_LIBRARY_API unsigned char
+rocksdb_options_get_enable_blob_list_gc(rocksdb_options_t* opt);
+
+extern ROCKSDB_LIBRARY_API void
+rocksdb_options_set_blob_list_gc_overall_garbage_ratio_low(
+    rocksdb_options_t* opt, double val);
+extern ROCKSDB_LIBRARY_API double
+rocksdb_options_get_blob_list_gc_overall_garbage_ratio_low(
+    rocksdb_options_t* opt);
+
+extern ROCKSDB_LIBRARY_API void
+rocksdb_options_set_blob_list_gc_overall_garbage_ratio_middle(
+    rocksdb_options_t* opt, double val);
+extern ROCKSDB_LIBRARY_API double
+rocksdb_options_get_blob_list_gc_overall_garbage_ratio_middle(
+    rocksdb_options_t* opt);
+
+extern ROCKSDB_LIBRARY_API void
+rocksdb_options_set_blob_list_gc_overall_gc_garbage_ratio_high(
+    rocksdb_options_t* opt, double val);
+extern ROCKSDB_LIBRARY_API double
+rocksdb_options_get_blob_list_gc_overall_gc_garbage_ratio_high(
+    rocksdb_options_t* opt);
+
+extern ROCKSDB_LIBRARY_API void
+rocksdb_options_set_blob_list_gc_gc_garbage_ratio(rocksdb_options_t* opt,
+                                                  double val);
+extern ROCKSDB_LIBRARY_API double
+rocksdb_options_get_blob_list_gc_gc_garbage_ratio(rocksdb_options_t* opt);
+
+extern ROCKSDB_LIBRARY_API void
+rocksdb_options_set_blob_list_gc_hard_gc_garbage_ratio(rocksdb_options_t* opt,
+                                                       double val);
+extern ROCKSDB_LIBRARY_API double
+rocksdb_options_get_blob_list_gc_hard_gc_garbage_ratio(rocksdb_options_t* opt);
+
+extern ROCKSDB_LIBRARY_API void
+rocksdb_options_set_blob_list_gc_max_blob_candidate_per_round(
+    rocksdb_options_t* opt, uint32_t val);
+extern ROCKSDB_LIBRARY_API uint32_t
+rocksdb_options_get_blob_list_gc_max_blob_candidate_per_round(
+    rocksdb_options_t* opt);
+
+extern ROCKSDB_LIBRARY_API void
+rocksdb_options_set_blob_list_gc_max_blob_per_compaction(rocksdb_options_t* opt,
+                                                         uint32_t val);
+extern ROCKSDB_LIBRARY_API uint32_t
+rocksdb_options_get_blob_list_gc_max_blob_per_compaction(
+    rocksdb_options_t* opt);
+
+extern ROCKSDB_LIBRARY_API void
+rocksdb_options_set_blob_list_gc_max_sst_candidate_per_round(
+    rocksdb_options_t* opt, uint32_t val);
+extern ROCKSDB_LIBRARY_API uint32_t
+rocksdb_options_get_blob_list_gc_max_sst_candidate_per_round(
+    rocksdb_options_t* opt);
+
+extern ROCKSDB_LIBRARY_API void
+rocksdb_options_set_blob_list_gc_sst_rewrite_garbage_bytes_ratio_threshold(
+    rocksdb_options_t* opt, double val);
+extern ROCKSDB_LIBRARY_API double
+rocksdb_options_get_blob_list_gc_sst_rewrite_garbage_bytes_ratio_threshold(
+    rocksdb_options_t* opt);
+
+extern ROCKSDB_LIBRARY_API void
+rocksdb_options_set_blob_list_gc_hard_sst_rewrite_garbage_bytes_ratio_threshold(
+    rocksdb_options_t* opt, double val);
+extern ROCKSDB_LIBRARY_API double
+rocksdb_options_get_blob_list_gc_hard_sst_rewrite_garbage_bytes_ratio_threshold(
+    rocksdb_options_t* opt);
+
 extern ROCKSDB_LIBRARY_API void
 rocksdb_options_set_blob_compaction_readahead_size(rocksdb_options_t* opt,
                                                    uint64_t val);
@@ -2449,6 +2527,15 @@ rocksdb_sst_file_metadata_get_oldest_blob_file_number(
     rocksdb_sst_file_metadata_t* file_meta);
 
 /**
+ * Returns the number of blob files referenced by the specified SST file.
+ * Only available when the sst file is created after enable_blob_file_set_record
+ * is on.
+ */
+extern ROCKSDB_LIBRARY_API size_t
+rocksdb_sst_file_metadata_get_blob_file_set_count(
+    rocksdb_sst_file_metadata_t* file_meta);
+
+/**
  * Returns the number of blob files in the specified column family.
  */
 extern ROCKSDB_LIBRARY_API size_t
@@ -2522,6 +2609,23 @@ rocksdb_blob_metadata_get_garbage_blob_count(
  */
 extern ROCKSDB_LIBRARY_API uint64_t
 rocksdb_blob_metadata_get_garbage_blob_bytes(
+    rocksdb_blob_metadata_t* blob_meta);
+
+/**
+ * Returns the number of SST files that reference the specified blob file
+ * through their oldest_blob_file_number.
+ */
+extern ROCKSDB_LIBRARY_API uint64_t
+rocksdb_blob_metadata_get_linked_ssts_count(rocksdb_blob_metadata_t* blob_meta);
+
+/**
+ * Returns the number of SST files that reference the specified blob file
+ * through their complete blob_file_set record.
+ * Only available when the blob is created after enable_blob_file_set_record is
+ * on.
+ */
+extern ROCKSDB_LIBRARY_API uint64_t
+rocksdb_blob_metadata_get_full_linked_ssts_count(
     rocksdb_blob_metadata_t* blob_meta);
 
 /* Transactions */

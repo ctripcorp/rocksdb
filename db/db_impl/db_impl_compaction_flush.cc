@@ -892,6 +892,20 @@ void DBImpl::NotifyOnFlushCompleted(
   // flush process.
 }
 
+namespace {
+// REQUIRES: DB mutex held
+bool LevelHasUntrackedBlobRefs(const VersionStorageInfo* vstorage, int level) {
+  assert(vstorage);
+  for (FileMetaData* f : vstorage->LevelFiles(level)) {
+    if (f->oldest_blob_file_number != kInvalidBlobFileNumber &&
+        f->blob_file_set.empty()) {
+      return true;
+    }
+  }
+  return false;
+}
+}  // namespace
+
 Status DBImpl::CompactRange(const CompactRangeOptions& options,
                             ColumnFamilyHandle* column_family,
                             const Slice* begin_without_ts,
@@ -1160,6 +1174,10 @@ Status DBImpl::CompactRangeInternal(const CompactRangeOptions& options,
       } else {
         assert(cfd->ioptions()->compaction_style == kCompactionStyleLevel);
         uint64_t next_file_number = versions_->current_next_file_number();
+
+        const bool is_all_range_compaction =
+            (begin == nullptr && end == nullptr);
+
         // Start compaction from `first_overlapped_level`, one level down at a
         // time, until output level >= max_overlapped_level.
         // When max_overlapped_level == 0, we will still compact from L0 -> L1
@@ -1196,11 +1214,23 @@ Status DBImpl::CompactRangeInternal(const CompactRangeOptions& options,
               level == 0) {
             output_level = ColumnFamilyData::kCompactToBaseLevel;
           }
+
+          bool rebuild_blob_file_set = false;
+          // Only whole range compaction will try to rebuild the blob file set.
+          if (is_all_range_compaction) {
+            InstrumentedMutexLock l(&mutex_);
+            if (cfd->GetLatestMutableCFOptions()->enable_blob_file_set_record) {
+              rebuild_blob_file_set = LevelHasUntrackedBlobRefs(
+                  cfd->current()->storage_info(), level);
+            }
+          }
+          const bool disallow_trivial_move =
+              rebuild_blob_file_set || !trim_ts.empty();
           // Use max value for `max_file_num_to_ignore` to always compact
           // files down.
           s = RunManualCompaction(
               cfd, level, output_level, options, begin, end, exclusive,
-              !trim_ts.empty() /* disallow_trivial_move */,
+              disallow_trivial_move,
               std::numeric_limits<uint64_t>::max() /* max_file_num_to_ignore */,
               trim_ts,
               output_level == ColumnFamilyData::kCompactToBaseLevel
@@ -1221,8 +1251,18 @@ Status DBImpl::CompactRangeInternal(const CompactRangeOptions& options,
         }
         if (s.ok()) {
           assert(final_output_level > 0);
+          bool rebuild_bottom_blob_file_set = false;
+          // Only whole range compaction will try to rebuild the blob file set.
+          if (is_all_range_compaction) {
+            InstrumentedMutexLock l(&mutex_);
+            if (cfd->GetLatestMutableCFOptions()->enable_blob_file_set_record) {
+              rebuild_bottom_blob_file_set = LevelHasUntrackedBlobRefs(
+                  cfd->current()->storage_info(), final_output_level);
+            }
+          }
           // bottommost level intra-level compaction
-          if ((options.bottommost_level_compaction ==
+          if (rebuild_bottom_blob_file_set ||
+              (options.bottommost_level_compaction ==
                    BottommostLevelCompaction::kIfHaveCompactionFilter &&
                (cfd->ioptions()->compaction_filter != nullptr ||
                 cfd->ioptions()->compaction_filter_factory != nullptr)) ||
@@ -1778,7 +1818,7 @@ Status DBImpl::ReFitLevel(ColumnFamilyData* cfd, int level, int target_level) {
           f->oldest_ancester_time, f->file_creation_time, f->epoch_number,
           f->file_checksum, f->file_checksum_func_name, f->unique_id,
           f->compensated_range_deletion_size, f->tail_size,
-          f->user_defined_timestamps_persisted);
+          f->user_defined_timestamps_persisted, f->blob_file_set);
     }
     ROCKS_LOG_DEBUG(immutable_db_options_.info_log,
                     "[%s] Apply version edit:\n%s", cfd->GetName().c_str(),
@@ -2658,7 +2698,7 @@ void DBImpl::MaybeScheduleFlushOrCompaction() {
     // DB is being deleted; no more background compactions
     return;
   }
-  auto bg_job_limits = GetBGJobLimits();
+  auto bg_job_limits = GetBGJobLimits(true);
   bool is_flush_pool_empty =
       env_->GetBackgroundThreads(Env::Priority::HIGH) == 0;
   while (!is_flush_pool_empty && unscheduled_flushes_ > 0 &&
@@ -2726,12 +2766,27 @@ void DBImpl::MaybeScheduleFlushOrCompaction() {
   }
 }
 
-DBImpl::BGJobLimits DBImpl::GetBGJobLimits() const {
+DBImpl::BGJobLimits DBImpl::GetBGJobLimits(bool check_blob_garbage) const {
   mutex_.AssertHeld();
+  bool parallelize_compactions = write_controller_.NeedSpeedupCompaction();
+  if (!parallelize_compactions && check_blob_garbage) {
+    for (auto* cfd : *versions_->GetColumnFamilySet()) {
+      if (cfd->IsDropped()) continue;
+      const auto& ratio =
+          cfd->current()->storage_info()->OverallBlobGarbageRatio();
+      if (!ratio.has_value()) continue;
+      const auto* mcf = cfd->GetLatestMutableCFOptions();
+      if (mcf->enable_blob_list_garbage_collection &&
+          *ratio >= mcf->blob_list_garbage_overall_garbage_ratio_low) {
+        parallelize_compactions = true;
+        break;
+      }
+    }
+  }
   return GetBGJobLimits(mutable_db_options_.max_background_flushes,
                         mutable_db_options_.max_background_compactions,
                         mutable_db_options_.max_background_jobs,
-                        write_controller_.NeedSpeedupCompaction());
+                        parallelize_compactions);
 }
 
 DBImpl::BGJobLimits DBImpl::GetBGJobLimits(int max_background_flushes,
@@ -2998,7 +3053,7 @@ Status DBImpl::BackgroundFlush(bool* made_progress, JobContext* job_context,
   }
 
   if (!bg_flush_args.empty()) {
-    auto bg_job_limits = GetBGJobLimits();
+    auto bg_job_limits = GetBGJobLimits(false);
     for (const auto& arg : bg_flush_args) {
       ColumnFamilyData* cfd = arg.cfd_;
       ROCKS_LOG_BUFFER(
@@ -3510,7 +3565,7 @@ Status DBImpl::BackgroundCompaction(bool* made_progress,
             f->file_creation_time, f->epoch_number, f->file_checksum,
             f->file_checksum_func_name, f->unique_id,
             f->compensated_range_deletion_size, f->tail_size,
-            f->user_defined_timestamps_persisted);
+            f->user_defined_timestamps_persisted, f->blob_file_set);
 
         ROCKS_LOG_BUFFER(
             log_buffer,

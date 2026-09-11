@@ -419,8 +419,9 @@ Status CompactionOutputs::AddToOutput(
   }
 
   const ParsedInternalKey& ikey = c_iter.ikey();
-  s = current_output().meta.UpdateBoundaries(key, value, ikey.sequence,
-                                             ikey.type);
+  s = current_output().meta.UpdateBoundaries(
+      key, value, ikey.sequence, ikey.type,
+      compaction_->mutable_cf_options()->enable_blob_file_set_record);
 
   return s;
 }

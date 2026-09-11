@@ -75,6 +75,8 @@ class SequenceIterWrapper : public InternalIterator {
   bool need_count_entries_;
 };
 
+class BlobListGCCompactionIteratorTestBase;
+
 class CompactionIterator {
  public:
   // A wrapper around Compaction. Has a much smaller interface, only what
@@ -100,6 +102,8 @@ class CompactionIterator {
     virtual bool allow_mmap_reads() const = 0;
 
     virtual bool enable_blob_garbage_collection() const = 0;
+
+    virtual bool enable_blob_list_garbage_collection() const = 0;
 
     virtual double blob_garbage_collection_age_cutoff() const = 0;
 
@@ -154,6 +158,10 @@ class CompactionIterator {
 
     bool enable_blob_garbage_collection() const override {
       return compaction_->enable_blob_garbage_collection();
+    }
+
+    bool enable_blob_list_garbage_collection() const override {
+      return compaction_->enable_blob_list_garbage_collection();
     }
 
     double blob_garbage_collection_age_cutoff() const override {
@@ -332,7 +340,12 @@ class CompactionIterator {
     }
   }
 
+  friend class BlobListGCCompactionIteratorTestBase;
+
   static uint64_t ComputeBlobGarbageCollectionCutoffFileNumber(
+      const CompactionProxy* compaction);
+  static std::unordered_set<uint64_t>
+  ComputeBlobListGarbageCollectionBlobFileNumbers(
       const CompactionProxy* compaction);
   static std::unique_ptr<BlobFetcher> CreateBlobFetcherIfNeeded(
       const CompactionProxy* compaction);
@@ -450,6 +463,8 @@ class CompactionIterator {
   PinnedIteratorsManager pinned_iters_mgr_;
 
   uint64_t blob_garbage_collection_cutoff_file_number_;
+
+  std::unordered_set<uint64_t> blob_list_gc_blob_file_numbers_;
 
   std::unique_ptr<BlobFetcher> blob_fetcher_;
   std::unique_ptr<PrefetchBufferCollection> prefetch_buffers_;

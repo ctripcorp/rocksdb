@@ -8,6 +8,8 @@
 #include <memory>
 #include <sstream>
 #include <string>
+#include <unordered_set>
+#include <vector>
 
 #include "db/version_edit.h"
 #include "db/version_set.h"
@@ -65,8 +67,11 @@ class VersionBuilderTest : public testing::Test {
            bool sampled = false, SequenceNumber smallest_seqno = 0,
            SequenceNumber largest_seqno = 0,
            uint64_t oldest_blob_file_number = kInvalidBlobFileNumber,
+           const std::vector<uint64_t>& blob_file_set = {},
            uint64_t epoch_number = kUnknownEpochNumber) {
     assert(level < vstorage_.num_levels());
+    std::unordered_set<uint64_t> blob_files(blob_file_set.begin(),
+                                            blob_file_set.end());
     FileMetaData* f = new FileMetaData(
         file_number, path_id, file_size, GetInternalKey(smallest, smallest_seq),
         GetInternalKey(largest, largest_seq), smallest_seqno, largest_seqno,
@@ -74,7 +79,7 @@ class VersionBuilderTest : public testing::Test {
         oldest_blob_file_number, kUnknownOldestAncesterTime,
         kUnknownFileCreationTime, epoch_number, kUnknownFileChecksum,
         kUnknownFileChecksumFuncName, kNullUniqueId64x2, 0, 0,
-        /* user_defined_timestamps_persisted */ true);
+        /* user_defined_timestamps_persisted */ true, std::move(blob_files));
     f->compensated_file_size = file_size;
     f->num_entries = num_entries;
     f->num_deletions = num_deletions;
@@ -89,13 +94,14 @@ class VersionBuilderTest : public testing::Test {
                uint64_t total_blob_bytes, std::string checksum_method,
                std::string checksum_value,
                BlobFileMetaData::LinkedSsts linked_ssts,
+               BlobFileMetaData::FullLinkedSsts full_linked_ssts,
                uint64_t garbage_blob_count, uint64_t garbage_blob_bytes) {
     auto shared_meta = SharedBlobFileMetaData::Create(
         blob_file_number, total_blob_count, total_blob_bytes,
         std::move(checksum_method), std::move(checksum_value));
-    auto meta =
-        BlobFileMetaData::Create(std::move(shared_meta), std::move(linked_ssts),
-                                 garbage_blob_count, garbage_blob_bytes);
+    auto meta = BlobFileMetaData::Create(
+        std::move(shared_meta), std::move(linked_ssts),
+        std::move(full_linked_ssts), garbage_blob_count, garbage_blob_bytes);
 
     vstorage_.AddBlobFile(std::move(meta));
   }
@@ -115,7 +121,8 @@ class VersionBuilderTest : public testing::Test {
 
     Add(level, table_file_number, smallest, largest, file_size, path_id,
         smallest_seq, largest_seq, num_entries, num_deletions, sampled,
-        smallest_seq, largest_seq, blob_file_number, epoch_number);
+        smallest_seq, largest_seq, blob_file_number, {blob_file_number},
+        epoch_number);
   }
 
   void AddDummyFileToEdit(VersionEdit* edit, uint64_t table_file_number,
@@ -137,7 +144,7 @@ class VersionBuilderTest : public testing::Test {
         marked_for_compaction, Temperature::kUnknown, blob_file_number,
         kUnknownOldestAncesterTime, kUnknownFileCreationTime, epoch_number,
         kUnknownFileChecksum, kUnknownFileChecksumFuncName, kNullUniqueId64x2,
-        0, 0, /* user_defined_timestamps_persisted */ true);
+        0, 0, /* user_defined_timestamps_persisted */ true, {blob_file_number});
   }
 
   void UpdateVersionStorageInfo(VersionStorageInfo* vstorage) {
@@ -167,7 +174,7 @@ TEST_F(VersionBuilderTest, ApplyAndSaveTo) {
       /*sampled*/ false, /*smallest_seqno*/ 0,
       /*largest_seqno*/ 0,
       /*oldest_blob_file_number*/ kInvalidBlobFileNumber,
-      /*epoch_number*/ 1);
+      /*blob_file_set*/ {}, /*epoch_number*/ 1);
 
   Add(1, 66U, "150", "200", 100U);
   Add(1, 88U, "201", "300", 100U);
@@ -189,7 +196,7 @@ TEST_F(VersionBuilderTest, ApplyAndSaveTo) {
       false, Temperature::kUnknown, kInvalidBlobFileNumber,
       kUnknownOldestAncesterTime, kUnknownFileCreationTime, kUnknownEpochNumber,
       kUnknownFileChecksum, kUnknownFileChecksumFuncName, kNullUniqueId64x2, 0,
-      0, /* user_defined_timestamps_persisted */ true);
+      0, /* user_defined_timestamps_persisted */ true, {});
   version_edit.DeleteFile(3, 27U);
 
   EnvOptions env_options;
@@ -217,10 +224,10 @@ TEST_F(VersionBuilderTest, ApplyAndSaveToDynamic) {
 
   Add(0, 1U, "150", "200", 100U, 0, 200U, 200U, 0, 0, false, 200U, 200U,
       /*oldest_blob_file_number*/ kInvalidBlobFileNumber,
-      /*epoch_number*/ 2);
+      /*blob_file_set*/ {}, /*epoch_number*/ 2);
   Add(0, 88U, "201", "300", 100U, 0, 100U, 100U, 0, 0, false, 100U, 100U,
       /*oldest_blob_file_number*/ kInvalidBlobFileNumber,
-      /*epoch_number*/ 1);
+      /*blob_file_set*/ {}, /*epoch_number*/ 1);
 
   Add(4, 6U, "150", "179", 100U);
   Add(4, 7U, "180", "220", 100U);
@@ -237,7 +244,7 @@ TEST_F(VersionBuilderTest, ApplyAndSaveToDynamic) {
       false, Temperature::kUnknown, kInvalidBlobFileNumber,
       kUnknownOldestAncesterTime, kUnknownFileCreationTime, kUnknownEpochNumber,
       kUnknownFileChecksum, kUnknownFileChecksumFuncName, kNullUniqueId64x2, 0,
-      0, /* user_defined_timestamps_persisted */ true);
+      0, /* user_defined_timestamps_persisted */ true, {});
 
   version_edit.DeleteFile(0, 1U);
   version_edit.DeleteFile(0, 88U);
@@ -269,10 +276,10 @@ TEST_F(VersionBuilderTest, ApplyAndSaveToDynamic2) {
 
   Add(0, 1U, "150", "200", 100U, 0, 200U, 200U, 0, 0, false, 200U, 200U,
       /*oldest_blob_file_number*/ kInvalidBlobFileNumber,
-      /*epoch_number*/ 2);
+      /*blob_file_set*/ {}, /*epoch_number*/ 2);
   Add(0, 88U, "201", "300", 100U, 0, 100U, 100U, 0, 0, false, 100U, 100U,
       /*oldest_blob_file_number*/ kInvalidBlobFileNumber,
-      /*epoch_number*/ 1);
+      /*blob_file_set*/ {}, /*epoch_number*/ 1);
 
   Add(4, 6U, "150", "179", 100U);
   Add(4, 7U, "180", "220", 100U);
@@ -289,7 +296,7 @@ TEST_F(VersionBuilderTest, ApplyAndSaveToDynamic2) {
       false, Temperature::kUnknown, kInvalidBlobFileNumber,
       kUnknownOldestAncesterTime, kUnknownFileCreationTime, kUnknownEpochNumber,
       kUnknownFileChecksum, kUnknownFileChecksumFuncName, kNullUniqueId64x2, 0,
-      0, /* user_defined_timestamps_persisted */ true);
+      0, /* user_defined_timestamps_persisted */ true, {});
   version_edit.DeleteFile(0, 1U);
   version_edit.DeleteFile(0, 88U);
   version_edit.DeleteFile(4, 6U);
@@ -326,31 +333,31 @@ TEST_F(VersionBuilderTest, ApplyMultipleAndSaveTo) {
       false, Temperature::kUnknown, kInvalidBlobFileNumber,
       kUnknownOldestAncesterTime, kUnknownFileCreationTime, kUnknownEpochNumber,
       kUnknownFileChecksum, kUnknownFileChecksumFuncName, kNullUniqueId64x2, 0,
-      0, /* user_defined_timestamps_persisted */ true);
+      0, /* user_defined_timestamps_persisted */ true, {});
   version_edit.AddFile(
       2, 676, 0, 100U, GetInternalKey("401"), GetInternalKey("450"), 200, 200,
       false, Temperature::kUnknown, kInvalidBlobFileNumber,
       kUnknownOldestAncesterTime, kUnknownFileCreationTime, kUnknownEpochNumber,
       kUnknownFileChecksum, kUnknownFileChecksumFuncName, kNullUniqueId64x2, 0,
-      0, /* user_defined_timestamps_persisted */ true);
+      0, /* user_defined_timestamps_persisted */ true, {});
   version_edit.AddFile(
       2, 636, 0, 100U, GetInternalKey("601"), GetInternalKey("650"), 200, 200,
       false, Temperature::kUnknown, kInvalidBlobFileNumber,
       kUnknownOldestAncesterTime, kUnknownFileCreationTime, kUnknownEpochNumber,
       kUnknownFileChecksum, kUnknownFileChecksumFuncName, kNullUniqueId64x2, 0,
-      0, /* user_defined_timestamps_persisted */ true);
+      0, /* user_defined_timestamps_persisted */ true, {});
   version_edit.AddFile(
       2, 616, 0, 100U, GetInternalKey("501"), GetInternalKey("550"), 200, 200,
       false, Temperature::kUnknown, kInvalidBlobFileNumber,
       kUnknownOldestAncesterTime, kUnknownFileCreationTime, kUnknownEpochNumber,
       kUnknownFileChecksum, kUnknownFileChecksumFuncName, kNullUniqueId64x2, 0,
-      0, /* user_defined_timestamps_persisted */ true);
+      0, /* user_defined_timestamps_persisted */ true, {});
   version_edit.AddFile(
       2, 606, 0, 100U, GetInternalKey("701"), GetInternalKey("750"), 200, 200,
       false, Temperature::kUnknown, kInvalidBlobFileNumber,
       kUnknownOldestAncesterTime, kUnknownFileCreationTime, kUnknownEpochNumber,
       kUnknownFileChecksum, kUnknownFileChecksumFuncName, kNullUniqueId64x2, 0,
-      0, /* user_defined_timestamps_persisted */ true);
+      0, /* user_defined_timestamps_persisted */ true, {});
 
   EnvOptions env_options;
   constexpr TableCache* table_cache = nullptr;
@@ -390,31 +397,31 @@ TEST_F(VersionBuilderTest, ApplyDeleteAndSaveTo) {
       false, Temperature::kUnknown, kInvalidBlobFileNumber,
       kUnknownOldestAncesterTime, kUnknownFileCreationTime, kUnknownEpochNumber,
       kUnknownFileChecksum, kUnknownFileChecksumFuncName, kNullUniqueId64x2, 0,
-      0, /* user_defined_timestamps_persisted */ true);
+      0, /* user_defined_timestamps_persisted */ true, {});
   version_edit.AddFile(
       2, 676, 0, 100U, GetInternalKey("401"), GetInternalKey("450"), 200, 200,
       false, Temperature::kUnknown, kInvalidBlobFileNumber,
       kUnknownOldestAncesterTime, kUnknownFileCreationTime, kUnknownEpochNumber,
       kUnknownFileChecksum, kUnknownFileChecksumFuncName, kNullUniqueId64x2, 0,
-      0, /* user_defined_timestamps_persisted */ true);
+      0, /* user_defined_timestamps_persisted */ true, {});
   version_edit.AddFile(
       2, 636, 0, 100U, GetInternalKey("601"), GetInternalKey("650"), 200, 200,
       false, Temperature::kUnknown, kInvalidBlobFileNumber,
       kUnknownOldestAncesterTime, kUnknownFileCreationTime, kUnknownEpochNumber,
       kUnknownFileChecksum, kUnknownFileChecksumFuncName, kNullUniqueId64x2, 0,
-      0, /* user_defined_timestamps_persisted */ true);
+      0, /* user_defined_timestamps_persisted */ true, {});
   version_edit.AddFile(
       2, 616, 0, 100U, GetInternalKey("501"), GetInternalKey("550"), 200, 200,
       false, Temperature::kUnknown, kInvalidBlobFileNumber,
       kUnknownOldestAncesterTime, kUnknownFileCreationTime, kUnknownEpochNumber,
       kUnknownFileChecksum, kUnknownFileChecksumFuncName, kNullUniqueId64x2, 0,
-      0, /* user_defined_timestamps_persisted */ true);
+      0, /* user_defined_timestamps_persisted */ true, {});
   version_edit.AddFile(
       2, 606, 0, 100U, GetInternalKey("701"), GetInternalKey("750"), 200, 200,
       false, Temperature::kUnknown, kInvalidBlobFileNumber,
       kUnknownOldestAncesterTime, kUnknownFileCreationTime, kUnknownEpochNumber,
       kUnknownFileChecksum, kUnknownFileChecksumFuncName, kNullUniqueId64x2, 0,
-      0, /* user_defined_timestamps_persisted */ true);
+      0, /* user_defined_timestamps_persisted */ true, {});
   ASSERT_OK(version_builder.Apply(&version_edit));
 
   VersionEdit version_edit2;
@@ -423,7 +430,7 @@ TEST_F(VersionBuilderTest, ApplyDeleteAndSaveTo) {
       false, Temperature::kUnknown, kInvalidBlobFileNumber,
       kUnknownOldestAncesterTime, kUnknownFileCreationTime, kUnknownEpochNumber,
       kUnknownFileChecksum, kUnknownFileChecksumFuncName, kNullUniqueId64x2, 0,
-      0, /* user_defined_timestamps_persisted */ true);
+      0, /* user_defined_timestamps_persisted */ true, {});
   version_edit2.DeleteFile(2, 616);
   version_edit2.DeleteFile(2, 636);
   version_edit.AddFile(
@@ -431,7 +438,7 @@ TEST_F(VersionBuilderTest, ApplyDeleteAndSaveTo) {
       false, Temperature::kUnknown, kInvalidBlobFileNumber,
       kUnknownOldestAncesterTime, kUnknownFileCreationTime, kUnknownEpochNumber,
       kUnknownFileChecksum, kUnknownFileChecksumFuncName, kNullUniqueId64x2, 0,
-      0, /* user_defined_timestamps_persisted */ true);
+      0, /* user_defined_timestamps_persisted */ true, {});
 
   ASSERT_OK(version_builder.Apply(&version_edit2));
   ASSERT_OK(version_builder.SaveTo(&new_vstorage));
@@ -543,7 +550,7 @@ TEST_F(VersionBuilderTest, ApplyFileDeletionAndAddition) {
       marked_for_compaction, Temperature::kUnknown, kInvalidBlobFileNumber,
       kUnknownOldestAncesterTime, kUnknownFileCreationTime, kUnknownEpochNumber,
       kUnknownFileChecksum, kUnknownFileChecksumFuncName, kNullUniqueId64x2, 0,
-      0, /* user_defined_timestamps_persisted */ true);
+      0, /* user_defined_timestamps_persisted */ true, {});
 
   ASSERT_OK(builder.Apply(&addition));
 
@@ -593,7 +600,7 @@ TEST_F(VersionBuilderTest, ApplyFileAdditionAlreadyInBase) {
       marked_for_compaction, Temperature::kUnknown, kInvalidBlobFileNumber,
       kUnknownOldestAncesterTime, kUnknownFileCreationTime, kUnknownEpochNumber,
       kUnknownFileChecksum, kUnknownFileChecksumFuncName, kNullUniqueId64x2, 0,
-      0, /* user_defined_timestamps_persisted */ true);
+      0, /* user_defined_timestamps_persisted */ true, {});
 
   const Status s = builder.Apply(&edit);
   ASSERT_TRUE(s.IsCorruption());
@@ -630,7 +637,7 @@ TEST_F(VersionBuilderTest, ApplyFileAdditionAlreadyApplied) {
       marked_for_compaction, Temperature::kUnknown, kInvalidBlobFileNumber,
       kUnknownOldestAncesterTime, kUnknownFileCreationTime, kUnknownEpochNumber,
       kUnknownFileChecksum, kUnknownFileChecksumFuncName, kNullUniqueId64x2, 0,
-      0, /* user_defined_timestamps_persisted */ true);
+      0, /* user_defined_timestamps_persisted */ true, {});
 
   ASSERT_OK(builder.Apply(&edit));
 
@@ -644,7 +651,7 @@ TEST_F(VersionBuilderTest, ApplyFileAdditionAlreadyApplied) {
       marked_for_compaction, Temperature::kUnknown, kInvalidBlobFileNumber,
       kUnknownOldestAncesterTime, kUnknownFileCreationTime, kUnknownEpochNumber,
       kUnknownFileChecksum, kUnknownFileChecksumFuncName, kNullUniqueId64x2, 0,
-      0, /* user_defined_timestamps_persisted */ true);
+      0, /* user_defined_timestamps_persisted */ true, {});
 
   const Status s = builder.Apply(&other_edit);
   ASSERT_TRUE(s.IsCorruption());
@@ -681,7 +688,7 @@ TEST_F(VersionBuilderTest, ApplyFileAdditionAndDeletion) {
       marked_for_compaction, Temperature::kUnknown, kInvalidBlobFileNumber,
       kUnknownOldestAncesterTime, kUnknownFileCreationTime, kUnknownEpochNumber,
       kUnknownFileChecksum, kUnknownFileChecksumFuncName, kNullUniqueId64x2, 0,
-      0, /* user_defined_timestamps_persisted */ true);
+      0, /* user_defined_timestamps_persisted */ true, {});
 
   ASSERT_OK(builder.Apply(&addition));
 
@@ -777,7 +784,8 @@ TEST_F(VersionBuilderTest, ApplyBlobFileAdditionAlreadyInBase) {
   constexpr uint64_t garbage_blob_bytes = 456789;
 
   AddBlob(blob_file_number, total_blob_count, total_blob_bytes, checksum_method,
-          checksum_value, BlobFileMetaData::LinkedSsts(), garbage_blob_count,
+          checksum_value, BlobFileMetaData::LinkedSsts(),
+          BlobFileMetaData::FullLinkedSsts{}, garbage_blob_count,
           garbage_blob_bytes);
 
   UpdateVersionStorageInfo();
@@ -847,6 +855,7 @@ TEST_F(VersionBuilderTest, ApplyBlobFileGarbageFileInBase) {
 
   AddBlob(blob_file_number, total_blob_count, total_blob_bytes, checksum_method,
           checksum_value, BlobFileMetaData::LinkedSsts{table_file_number},
+          BlobFileMetaData::FullLinkedSsts{table_file_number},
           garbage_blob_count, garbage_blob_bytes);
 
   const auto meta = vstorage_.GetBlobFileMetaData(blob_file_number);
@@ -975,6 +984,123 @@ TEST_F(VersionBuilderTest, ApplyBlobFileGarbageFileAdditionApplied) {
   UnrefFilesInVersion(&new_vstorage);
 }
 
+TEST_F(VersionBuilderTest, ApplyFileAdditionLinksFullSsts) {
+  constexpr uint64_t table_file_number = 10;
+  constexpr uint64_t first_blob_file_number = 1;
+  constexpr uint64_t second_blob_file_number = 2;
+
+  AddBlob(first_blob_file_number, /*total_blob_count=*/100,
+          /*total_blob_bytes=*/1000, /*checksum_method=*/"",
+          /*checksum_value=*/"", BlobFileMetaData::LinkedSsts{},
+          BlobFileMetaData::FullLinkedSsts{}, /*garbage_blob_count=*/0,
+          /*garbage_blob_bytes=*/0);
+  AddBlob(second_blob_file_number, /*total_blob_count=*/200,
+          /*total_blob_bytes=*/2000, /*checksum_method=*/"",
+          /*checksum_value=*/"", BlobFileMetaData::LinkedSsts{},
+          BlobFileMetaData::FullLinkedSsts{}, /*garbage_blob_count=*/0,
+          /*garbage_blob_bytes=*/0);
+
+  UpdateVersionStorageInfo();
+
+  EnvOptions env_options;
+  constexpr TableCache* table_cache = nullptr;
+  constexpr VersionSet* version_set = nullptr;
+
+  VersionBuilder builder(env_options, &ioptions_, table_cache, &vstorage_,
+                         version_set);
+
+  VersionEdit edit;
+  edit.AddFile(/*level=*/0, table_file_number, /*path_id=*/0,
+               /*file_size=*/100, GetInternalKey("bar"), GetInternalKey("foo"),
+               /*smallest_seqno=*/100, /*largest_seqno=*/300,
+               /*marked_for_compaction=*/false, Temperature::kUnknown,
+               first_blob_file_number, kUnknownOldestAncesterTime,
+               kUnknownFileCreationTime, /*epoch_number=*/1,
+               kUnknownFileChecksum, kUnknownFileChecksumFuncName,
+               kNullUniqueId64x2, 0, 0,
+               /* user_defined_timestamps_persisted */ true,
+               {first_blob_file_number, second_blob_file_number});
+
+  ASSERT_OK(builder.Apply(&edit));
+
+  constexpr bool force_consistency_checks = false;
+  VersionStorageInfo new_vstorage(&icmp_, ucmp_, options_.num_levels,
+                                  kCompactionStyleLevel, &vstorage_,
+                                  force_consistency_checks);
+
+  ASSERT_OK(builder.SaveTo(&new_vstorage));
+
+  UpdateVersionStorageInfo(&new_vstorage);
+
+  const auto first_meta =
+      new_vstorage.GetBlobFileMetaData(first_blob_file_number);
+  ASSERT_NE(first_meta, nullptr);
+  ASSERT_EQ(first_meta->GetFullLinkedSsts(),
+            BlobFileMetaData::FullLinkedSsts{table_file_number});
+  ASSERT_EQ(first_meta->GetLinkedSsts(),
+            BlobFileMetaData::LinkedSsts{table_file_number});
+
+  const auto second_meta =
+      new_vstorage.GetBlobFileMetaData(second_blob_file_number);
+  ASSERT_NE(second_meta, nullptr);
+  ASSERT_EQ(second_meta->GetFullLinkedSsts(),
+            BlobFileMetaData::FullLinkedSsts{table_file_number});
+  ASSERT_TRUE(second_meta->GetLinkedSsts().empty());
+
+  UnrefFilesInVersion(&new_vstorage);
+}
+
+TEST_F(VersionBuilderTest, ApplyFileDeletionUnlinksFullSsts) {
+  constexpr uint64_t deleted_table_file_number = 10;
+  constexpr uint64_t kept_table_file_number = 11;
+  constexpr uint64_t blob_file_number = 1;
+
+  AddBlob(blob_file_number, /*total_blob_count=*/100,
+          /*total_blob_bytes=*/1000, /*checksum_method=*/"",
+          /*checksum_value=*/"",
+          BlobFileMetaData::LinkedSsts{deleted_table_file_number,
+                                       kept_table_file_number},
+          BlobFileMetaData::FullLinkedSsts{deleted_table_file_number,
+                                           kept_table_file_number},
+          /*garbage_blob_count=*/0, /*garbage_blob_bytes=*/0);
+
+  AddDummyFile(deleted_table_file_number, blob_file_number,
+               /*epoch_number=*/1);
+  AddDummyFile(kept_table_file_number, blob_file_number, /*epoch_number=*/2);
+
+  UpdateVersionStorageInfo();
+
+  EnvOptions env_options;
+  constexpr TableCache* table_cache = nullptr;
+  constexpr VersionSet* version_set = nullptr;
+
+  VersionBuilder builder(env_options, &ioptions_, table_cache, &vstorage_,
+                         version_set);
+
+  VersionEdit edit;
+  edit.DeleteFile(/*level=*/0, deleted_table_file_number);
+
+  ASSERT_OK(builder.Apply(&edit));
+
+  constexpr bool force_consistency_checks = false;
+  VersionStorageInfo new_vstorage(&icmp_, ucmp_, options_.num_levels,
+                                  kCompactionStyleLevel, &vstorage_,
+                                  force_consistency_checks);
+
+  ASSERT_OK(builder.SaveTo(&new_vstorage));
+
+  UpdateVersionStorageInfo(&new_vstorage);
+
+  const auto meta = new_vstorage.GetBlobFileMetaData(blob_file_number);
+  ASSERT_NE(meta, nullptr);
+  ASSERT_EQ(meta->GetFullLinkedSsts(),
+            BlobFileMetaData::FullLinkedSsts{kept_table_file_number});
+  ASSERT_EQ(meta->GetLinkedSsts(),
+            BlobFileMetaData::LinkedSsts{kept_table_file_number});
+
+  UnrefFilesInVersion(&new_vstorage);
+}
+
 TEST_F(VersionBuilderTest, ApplyBlobFileGarbageFileNotFound) {
   // Attempt to increase the amount of garbage for a blob file that is
   // neither in the base version, nor was it added using a version edit.
@@ -1081,8 +1207,9 @@ TEST_F(VersionBuilderTest, SaveBlobFilesTo) {
     AddBlob(blob_file_number, total_blob_count, total_blob_bytes,
             /* checksum_method */ std::string(),
             /* checksum_value */ std::string(),
-            BlobFileMetaData::LinkedSsts{table_file_number}, garbage_blob_count,
-            garbage_blob_bytes);
+            BlobFileMetaData::LinkedSsts{table_file_number},
+            BlobFileMetaData::FullLinkedSsts{table_file_number},
+            garbage_blob_count, garbage_blob_bytes);
   }
 
   // Add dummy table files to ensure the blob files are referenced.
@@ -1218,6 +1345,7 @@ TEST_F(VersionBuilderTest, SaveBlobFilesToConcurrentJobs) {
   AddBlob(base_blob_file_number, base_total_blob_count, base_total_blob_bytes,
           checksum_method, checksum_value,
           BlobFileMetaData::LinkedSsts{base_table_file_number},
+          BlobFileMetaData::FullLinkedSsts{base_table_file_number},
           garbage_blob_count, garbage_blob_bytes);
 
   UpdateVersionStorageInfo();
@@ -1255,7 +1383,7 @@ TEST_F(VersionBuilderTest, SaveBlobFilesToConcurrentJobs) {
       marked_for_compaction, Temperature::kUnknown, blob_file_number,
       kUnknownOldestAncesterTime, kUnknownFileCreationTime, 2 /*epoch_number*/,
       checksum_value, checksum_method, kNullUniqueId64x2, 0, 0,
-      /* user_defined_timestamps_persisted */ true);
+      /* user_defined_timestamps_persisted */ true, {blob_file_number});
   edit.AddBlobFile(blob_file_number, total_blob_count, total_blob_bytes,
                    checksum_method, checksum_value);
 
@@ -1308,7 +1436,7 @@ TEST_F(VersionBuilderTest, CheckConsistencyForBlobFiles) {
       /* path_id */ 0, /* smallest_seq */ 100, /* largest_seq */ 100,
       /* num_entries */ 0, /* num_deletions */ 0,
       /* sampled */ false, /* smallest_seqno */ 100, /* largest_seqno */ 100,
-      /* oldest_blob_file_number */ 16);
+      /* oldest_blob_file_number */ 16, /* blob_file_set */ {16});
   Add(/* level */ 1, /* file_number */ 23, /* smallest */ "201",
       /* largest */ "300", /* file_size */ 100,
       /* path_id */ 0, /* smallest_seq */ 200, /* largest_seq */ 200,
@@ -1320,6 +1448,7 @@ TEST_F(VersionBuilderTest, CheckConsistencyForBlobFiles) {
           /* total_blob_bytes */ 1000000,
           /* checksum_method */ std::string(),
           /* checksum_value */ std::string(), BlobFileMetaData::LinkedSsts{1},
+          BlobFileMetaData::FullLinkedSsts{1},
           /* garbage_blob_count */ 500, /* garbage_blob_bytes */ 300000);
 
   UpdateVersionStorageInfo();
@@ -1344,7 +1473,7 @@ TEST_F(VersionBuilderTest, CheckConsistencyForBlobFiles) {
                kUnknownFileCreationTime, kUnknownEpochNumber,
                kUnknownFileChecksum, kUnknownFileChecksumFuncName,
                kNullUniqueId64x2, 0, 0,
-               /* user_defined_timestamps_persisted */ true);
+               /* user_defined_timestamps_persisted */ true, {16});
 
   edit.AddFile(/* level */ 1, /* file_number */ 700, /* path_id */ 0,
                /* file_size */ 100, /* smallest */ GetInternalKey("801"),
@@ -1355,7 +1484,7 @@ TEST_F(VersionBuilderTest, CheckConsistencyForBlobFiles) {
                kUnknownFileCreationTime, kUnknownEpochNumber,
                kUnknownFileChecksum, kUnknownFileChecksumFuncName,
                kNullUniqueId64x2, 0, 0,
-               /* user_defined_timestamps_persisted */ true);
+               /* user_defined_timestamps_persisted */ true, {1000});
   edit.AddBlobFile(/* blob_file_number */ 1000, /* total_blob_count */ 2000,
                    /* total_blob_bytes */ 200000,
                    /* checksum_method */ std::string(),
@@ -1385,12 +1514,13 @@ TEST_F(VersionBuilderTest, CheckConsistencyForBlobFilesInconsistentLinks) {
       /* path_id */ 0, /* smallest_seq */ 100, /* largest_seq */ 100,
       /* num_entries */ 0, /* num_deletions */ 0,
       /* sampled */ false, /* smallest_seqno */ 100, /* largest_seqno */ 100,
-      /* oldest_blob_file_number */ 256);
+      /* oldest_blob_file_number */ 256, /* blob_file_set */ {256});
 
   AddBlob(/* blob_file_number */ 16, /* total_blob_count */ 1000,
           /* total_blob_bytes */ 1000000,
           /* checksum_method */ std::string(),
           /* checksum_value */ std::string(), BlobFileMetaData::LinkedSsts{1},
+          BlobFileMetaData::FullLinkedSsts{1},
           /* garbage_blob_count */ 500, /* garbage_blob_bytes */ 300000);
 
   UpdateVersionStorageInfo();
@@ -1426,12 +1556,13 @@ TEST_F(VersionBuilderTest, CheckConsistencyForBlobFilesAllGarbage) {
       /* path_id */ 0, /* smallest_seq */ 100, /* largest_seq */ 100,
       /* num_entries */ 0, /* num_deletions */ 0,
       /* sampled */ false, /* smallest_seqno */ 100, /* largest_seqno */ 100,
-      /* oldest_blob_file_number */ 16);
+      /* oldest_blob_file_number */ 16, /* blob_file_set */ {16});
 
   AddBlob(/* blob_file_number */ 16, /* total_blob_count */ 1000,
           /* total_blob_bytes */ 1000000,
           /* checksum_method */ std::string(),
           /* checksum_value */ std::string(), BlobFileMetaData::LinkedSsts{1},
+          BlobFileMetaData::FullLinkedSsts{1},
           /* garbage_blob_count */ 1000, /* garbage_blob_bytes */ 1000000);
 
   UpdateVersionStorageInfo();
@@ -1466,12 +1597,13 @@ TEST_F(VersionBuilderTest, CheckConsistencyForBlobFilesAllGarbageLinkedSsts) {
       /* path_id */ 0, /* smallest_seq */ 100, /* largest_seq */ 100,
       /* num_entries */ 0, /* num_deletions */ 0,
       /* sampled */ false, /* smallest_seqno */ 100, /* largest_seqno */ 100,
-      /* oldest_blob_file_number */ 16);
+      /* oldest_blob_file_number */ 16, /* blob_file_set */ {16});
 
   AddBlob(/* blob_file_number */ 16, /* total_blob_count */ 1000,
           /* total_blob_bytes */ 1000000,
           /* checksum_method */ std::string(),
           /* checksum_value */ std::string(), BlobFileMetaData::LinkedSsts{1},
+          BlobFileMetaData::FullLinkedSsts{1},
           /* garbage_blob_count */ 0, /* garbage_blob_bytes */ 0);
 
   UpdateVersionStorageInfo();
@@ -1522,7 +1654,8 @@ TEST_F(VersionBuilderTest, MaintainLinkedSstsForBlobFiles) {
         /* num_entries */ 0, /* num_deletions */ 0,
         /* sampled */ false, /* smallest_seqno */ i * 100,
         /* largest_seqno */ i * 100,
-        /* oldest_blob_file_number */ ((i - 1) % 5) + 1);
+        /* oldest_blob_file_number */ ((i - 1) % 5) + 1,
+        /* blob_file_set */ {((i - 1) % 5) + 1});
   }
 
   for (uint64_t i = 1; i <= 5; ++i) {
@@ -1531,6 +1664,7 @@ TEST_F(VersionBuilderTest, MaintainLinkedSstsForBlobFiles) {
             /* checksum_method */ std::string(),
             /* checksum_value */ std::string(),
             BlobFileMetaData::LinkedSsts{i, i + 5},
+            BlobFileMetaData::FullLinkedSsts{i, i + 5},
             /* garbage_blob_count */ 1000, /* garbage_blob_bytes */ 1000000);
   }
 
@@ -1577,7 +1711,7 @@ TEST_F(VersionBuilderTest, MaintainLinkedSstsForBlobFiles) {
       /* oldest_blob_file_number */ 1, kUnknownOldestAncesterTime,
       kUnknownFileCreationTime, kUnknownEpochNumber, kUnknownFileChecksum,
       kUnknownFileChecksumFuncName, kNullUniqueId64x2, 0, 0,
-      /* user_defined_timestamps_persisted */ true);
+      /* user_defined_timestamps_persisted */ true, {1});
 
   // Add an SST that does not reference any blob files.
   edit.AddFile(
@@ -1588,7 +1722,7 @@ TEST_F(VersionBuilderTest, MaintainLinkedSstsForBlobFiles) {
       Temperature::kUnknown, kInvalidBlobFileNumber, kUnknownOldestAncesterTime,
       kUnknownFileCreationTime, kUnknownEpochNumber, kUnknownFileChecksum,
       kUnknownFileChecksumFuncName, kNullUniqueId64x2, 0, 0,
-      /* user_defined_timestamps_persisted */ true);
+      /* user_defined_timestamps_persisted */ true, {});
 
   // Delete a file that references a blob file.
   edit.DeleteFile(/* level */ 1, /* file_number */ 6);
@@ -1612,7 +1746,7 @@ TEST_F(VersionBuilderTest, MaintainLinkedSstsForBlobFiles) {
                kUnknownFileCreationTime, kUnknownEpochNumber,
                kUnknownFileChecksum, kUnknownFileChecksumFuncName,
                kNullUniqueId64x2, 0, 0,
-               /* user_defined_timestamps_persisted */ true);
+               /* user_defined_timestamps_persisted */ true, {3});
 
   // Trivially move a file that does not reference any blob files.
   edit.DeleteFile(/* level */ 1, /* file_number */ 13);
@@ -1625,7 +1759,7 @@ TEST_F(VersionBuilderTest, MaintainLinkedSstsForBlobFiles) {
                kUnknownOldestAncesterTime, kUnknownFileCreationTime,
                kUnknownEpochNumber, kUnknownFileChecksum,
                kUnknownFileChecksumFuncName, kNullUniqueId64x2, 0, 0,
-               /* user_defined_timestamps_persisted */ true);
+               /* user_defined_timestamps_persisted */ true, {});
 
   // Add one more SST file that references a blob file, then promptly
   // delete it in a second version edit before the new version gets saved.
@@ -1640,7 +1774,7 @@ TEST_F(VersionBuilderTest, MaintainLinkedSstsForBlobFiles) {
                kUnknownFileCreationTime, kUnknownEpochNumber,
                kUnknownFileChecksum, kUnknownFileChecksumFuncName,
                kNullUniqueId64x2, 0, 0,
-               /* user_defined_timestamps_persisted */ true);
+               /* user_defined_timestamps_persisted */ true, {5});
 
   VersionEdit edit2;
 
@@ -1695,7 +1829,7 @@ TEST_F(VersionBuilderTest, CheckConsistencyForFileDeletedTwice) {
       /*sampled*/ false, /*smallest_seqno*/ 0,
       /*largest_seqno*/ 0,
       /*oldest_blob_file_number*/ kInvalidBlobFileNumber,
-      /*epoch_number*/ 1);
+      /*blob_file_set*/ {}, /*epoch_number*/ 1);
 
   UpdateVersionStorageInfo();
 
@@ -1741,7 +1875,8 @@ TEST_F(VersionBuilderTest, CheckConsistencyForL0FilesSortedByEpochNumber) {
       /* oldest_blob_file_number */ kInvalidBlobFileNumber,
       kUnknownOldestAncesterTime, kUnknownFileCreationTime,
       1 /* epoch_number */, kUnknownFileChecksum, kUnknownFileChecksumFuncName,
-      kNullUniqueId64x2, 0, 0, /* user_defined_timestamps_persisted */ true);
+      kNullUniqueId64x2, 0, 0, /* user_defined_timestamps_persisted */ true,
+      {});
   version_edit_1.AddFile(
       /* level */ 0, /* file_number */ 2U, /* path_id */ 0,
       /* file_size */ 100, /* smallest */ GetInternalKey("b", 2),
@@ -1751,7 +1886,8 @@ TEST_F(VersionBuilderTest, CheckConsistencyForL0FilesSortedByEpochNumber) {
       /* oldest_blob_file_number */ kInvalidBlobFileNumber,
       kUnknownOldestAncesterTime, kUnknownFileCreationTime,
       1 /* epoch_number */, kUnknownFileChecksum, kUnknownFileChecksumFuncName,
-      kNullUniqueId64x2, 0, 0, /* user_defined_timestamps_persisted */ true);
+      kNullUniqueId64x2, 0, 0, /* user_defined_timestamps_persisted */ true,
+      {});
 
   VersionBuilder version_builder_1(EnvOptions(), &ioptions_,
                                    nullptr /* table_cache */, &vstorage_,
@@ -1778,7 +1914,8 @@ TEST_F(VersionBuilderTest, CheckConsistencyForL0FilesSortedByEpochNumber) {
       /* oldest_blob_file_number */ kInvalidBlobFileNumber,
       kUnknownOldestAncesterTime, kUnknownFileCreationTime,
       1 /* epoch_number */, kUnknownFileChecksum, kUnknownFileChecksumFuncName,
-      kNullUniqueId64x2, 0, 0, /* user_defined_timestamps_persisted */ true);
+      kNullUniqueId64x2, 0, 0, /* user_defined_timestamps_persisted */ true,
+      {});
   version_edit_2.AddFile(
       /* level */ 0, /* file_number */ 2U, /* path_id */ 0,
       /* file_size */ 100, /* smallest */ GetInternalKey("b", 2),
@@ -1788,7 +1925,8 @@ TEST_F(VersionBuilderTest, CheckConsistencyForL0FilesSortedByEpochNumber) {
       /* oldest_blob_file_number */ kInvalidBlobFileNumber,
       kUnknownOldestAncesterTime, kUnknownFileCreationTime,
       2 /* epoch_number */, kUnknownFileChecksum, kUnknownFileChecksumFuncName,
-      kNullUniqueId64x2, 0, 0, /* user_defined_timestamps_persisted */ true);
+      kNullUniqueId64x2, 0, 0, /* user_defined_timestamps_persisted */ true,
+      {});
 
   VersionBuilder version_builder_2(EnvOptions(), &ioptions_,
                                    nullptr /* table_cache */, &vstorage_,
