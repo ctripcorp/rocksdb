@@ -4,7 +4,6 @@
 //  (found in the LICENSE.Apache file in the root directory).
 //
 
-
 #include "logging/auto_roll_logger.h"
 
 #include <sys/stat.h>
@@ -280,7 +279,8 @@ TEST_F(AutoRollLoggerTest, OpenLogFilesMultipleTimesWithOptionLog_max_size) {
 }
 
 TEST_F(AutoRollLoggerTest, CompositeRollByTimeAndSizeLogger) {
-  size_t time = 2, log_max_size = 1024 * 5;
+  size_t time = 2;
+  size_t log_max_size = 1024 * 5;
   size_t keep_log_file_num = 10;
 
   InitTestDb();
@@ -574,8 +574,8 @@ TEST_F(AutoRollLoggerTest, Close) {
 static std::vector<std::string> GetOldFileNames(const std::string& path) {
   std::vector<std::string> ret;
 
-  const std::string dirname = path.substr(/*start=*/0, path.find_last_of("/"));
-  const std::string fname = path.substr(path.find_last_of("/") + 1);
+  const std::string dirname = path.substr(/*start=*/0, path.find_last_of('/'));
+  const std::string fname = path.substr(path.find_last_of('/') + 1);
 
   std::vector<std::string> children;
   EXPECT_OK(Env::Default()->GetChildren(dirname, &children));
@@ -648,7 +648,7 @@ TEST_F(AutoRollLoggerTest, LogHeaderTest) {
 }
 
 TEST_F(AutoRollLoggerTest, LogFileExistence) {
-  ROCKSDB_NAMESPACE::DB* db;
+  std::unique_ptr<ROCKSDB_NAMESPACE::DB> db;
   ROCKSDB_NAMESPACE::Options options;
 #ifdef OS_WIN
   // Replace all slashes in the path so windows CompSpec does not
@@ -665,7 +665,6 @@ TEST_F(AutoRollLoggerTest, LogFileExistence) {
   options.create_if_missing = true;
   ASSERT_OK(ROCKSDB_NAMESPACE::DB::Open(options, kTestDir, &db));
   ASSERT_OK(default_env->FileExists(kLogFile));
-  delete db;
 }
 
 TEST_F(AutoRollLoggerTest, FileCreateFailure) {
@@ -721,6 +720,49 @@ TEST_F(AutoRollLoggerTest, RenameError) {
   }
 }
 
+TEST_F(AutoRollLoggerTest, GetInfoLogFilesPrefixMismatch) {
+
+  InitTestDb();
+  const size_t kFileNum = 3;
+  const size_t kMaxFileSize = 512;
+
+
+  std::string relative_dbname = "test_relative_db";
+  std::string db_log_dir = kTestDir; 
+
+ 
+  ASSERT_OK(default_env->CreateDirIfMissing(relative_dbname));
+
+
+  {
+    AutoRollLogger logger(FileSystem::Default(), SystemClock::Default(),
+                          relative_dbname, db_log_dir, kMaxFileSize, 0, kFileNum);
+
+    RollNTimesBySize(&logger, kFileNum + 2, kMaxFileSize);
+  }
+  std::vector<std::string> files = GetLogFiles();
+  ASSERT_EQ(kFileNum, files.size())
+      << "Log files should be created";
+  
+  {
+    AutoRollLogger logger(FileSystem::Default(), SystemClock::Default(),
+                          relative_dbname, db_log_dir, kMaxFileSize, 0, kFileNum);
+
+    RollNTimesBySize(&logger, 1, kMaxFileSize);
+  }
+
+
+  files = GetLogFiles();
+
+  ASSERT_EQ(kFileNum, files.size())
+      << "Log files exceed keep_log_file_num limit. "
+      << "Bug: GetInfoLogFiles uses wrong prefix when db_log_dir is set. "
+      << "Expected: " << kFileNum << ", Actual: " << files.size();
+
+  default_env->DeleteDir(relative_dbname).PermitUncheckedError();
+  CleanupLogFiles();
+}
+
 }  // namespace ROCKSDB_NAMESPACE
 
 int main(int argc, char** argv) {
@@ -728,4 +770,3 @@ int main(int argc, char** argv) {
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();
 }
-

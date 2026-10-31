@@ -122,7 +122,8 @@ void AutoRollLogger::GetExistingFiles() {
   std::string parent_dir;
   std::vector<std::string> info_log_files;
   Status s =
-      GetInfoLogFiles(fs_, db_log_dir_, dbname_, &parent_dir, &info_log_files);
+      GetInfoLogFiles(fs_, db_log_dir_, dbname_, db_absolute_path_,
+                     &parent_dir, &info_log_files);
   if (status_.ok()) {
     status_ = s;
   }
@@ -192,14 +193,13 @@ void AutoRollLogger::LogInternal(const char* format, ...) {
 }
 
 void AutoRollLogger::Logv(const char* format, va_list ap) {
-  assert(GetStatus().ok());
-  if (!logger_) {
-    return;
-  }
-
   std::shared_ptr<Logger> logger;
   {
     MutexLock l(&mutex_);
+    assert(GetStatus().ok());
+    if (!logger_) {
+      return;
+    }
     if ((kLogFileTimeToRoll > 0 && LogExpired()) ||
         (kMaxLogFileSize > 0 && logger_->GetLogFileSize() >= kMaxLogFileSize)) {
       RollLogFile();
@@ -240,10 +240,6 @@ void AutoRollLogger::WriteHeaderInfo() {
 }
 
 void AutoRollLogger::LogHeader(const char* format, va_list args) {
-  if (!logger_) {
-    return;
-  }
-
   // header message are to be retained in memory. Since we cannot make any
   // assumptions about the data contained in va_list, we will retain them as
   // strings
@@ -253,6 +249,9 @@ void AutoRollLogger::LogHeader(const char* format, va_list args) {
   va_end(tmp);
 
   MutexLock l(&mutex_);
+  if (!logger_) {
+    return;
+  }
   headers_.push_back(data);
 
   // Log the original message to the current log

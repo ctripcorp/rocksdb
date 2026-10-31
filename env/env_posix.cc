@@ -14,20 +14,22 @@
 #ifndef ROCKSDB_NO_DYNAMIC_EXTENSION
 #include <dlfcn.h>
 #endif
-#include <errno.h>
 #include <fcntl.h>
+
+#include <cerrno>
 
 #if defined(ROCKSDB_IOURING_PRESENT)
 #include <liburing.h>
 #endif
 #include <pthread.h>
-#include <signal.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
-#if defined(OS_LINUX) || defined(OS_SOLARIS) || defined(OS_ANDROID)
+
+#include <csignal>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#if defined(OS_LINUX) || defined(OS_ANDROID)
 #include <sys/statfs.h>
 #endif
 #include <sys/statvfs.h>
@@ -36,10 +38,10 @@
 #if defined(ROCKSDB_IOURING_PRESENT)
 #include <sys/uio.h>
 #endif
-#include <time.h>
 #include <unistd.h>
 
 #include <algorithm>
+#include <ctime>
 // Get nano time includes
 #if defined(OS_LINUX) || defined(OS_FREEBSD) || defined(OS_GNU_KFREEBSD)
 #elif defined(__MACH__)
@@ -84,15 +86,86 @@
 namespace ROCKSDB_NAMESPACE {
 #if defined(OS_WIN)
 static const std::string kSharedLibExt = ".dll";
-static const char kPathSeparator = ';';
+[[maybe_unused]] static const char kPathSeparator = ';';
 #else
-static const char kPathSeparator = ':';
+[[maybe_unused]] static const char kPathSeparator = ':';
 #if defined(OS_MACOSX)
 static const std::string kSharedLibExt = ".dylib";
 #else
 static const std::string kSharedLibExt = ".so";
 #endif
 #endif
+
+namespace port {
+
+constexpr bool is_leap_year(time_t year) noexcept {
+  return (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0);
+}
+
+static const int g_daylight_active = [] {
+  tzset();  // Now 'timezone' global is populated.
+  time_t t = time(nullptr);
+  if (const struct tm* lt = localtime(&t)) {  // safe in global cons
+    return lt->tm_isdst;
+  }
+  return 0;
+}();
+
+static void nolocks_localtime(struct tm* tmp, time_t t, time_t tz,
+                              int dst) noexcept {
+  const int secs_min = 60;
+  const int secs_hour = 3600;
+  const int secs_day = 3600 * 24;
+
+  t -= tz;                         /* Adjust for timezone. */
+  t += 3600 * dst;                 /* Adjust for daylight time. */
+  int days = int(t / secs_day);    /* Days passed since epoch. */
+  int seconds = int(t % secs_day); /* Remaining seconds. */
+
+  tmp->tm_isdst = dst;
+  tmp->tm_hour = seconds / secs_hour;
+  tmp->tm_min = (seconds % secs_hour) / secs_min;
+  tmp->tm_sec = (seconds % secs_hour) % secs_min;
+
+  /* 1/1/1970 was a Thursday, that is, day 4 from the POV of the tm structure
+   * where sunday = 0, so to calculate the day of the week we have to add 4
+   * and take the modulo by 7. */
+  tmp->tm_wday = (days + 4) % 7;
+
+  /* Calculate the current year. */
+  tmp->tm_year = 1970;
+  while (1) {
+    /* Leap years have one day more. */
+    int days_this_year = 365 + is_leap_year(tmp->tm_year);
+    if (days_this_year > days) break;
+    days -= days_this_year;
+    tmp->tm_year++;
+  }
+  tmp->tm_yday = days; /* Number of day of the current year. */
+  /* We need to calculate in which month and day of the month we are. To do
+   * so we need to skip days according to how many days there are in each
+   * month, and adjust for the leap year that has one more day in February. */
+  static constexpr int kMonthDays[2][12] = {
+      {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31},
+      {31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31}};
+  const int* mdays = kMonthDays[is_leap_year(tmp->tm_year)];
+
+  tmp->tm_mon = 0;
+  while (days >= mdays[tmp->tm_mon]) {
+    days -= mdays[tmp->tm_mon];
+    tmp->tm_mon++;
+  }
+
+  tmp->tm_mday = days + 1; /* Add 1 since our 'days' is zero-based. */
+  tmp->tm_year -= 1900;    /* Surprisingly tm_year is year-1900. */
+}
+
+struct tm* LocalTimeR(const time_t* timep, struct tm* result) {
+  nolocks_localtime(result, *timep, timezone, g_daylight_active);
+  return result;
+}
+
+}  // namespace port
 
 namespace {
 
@@ -145,8 +218,6 @@ class PosixClock : public SystemClock {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return static_cast<uint64_t>(ts.tv_sec) * 1000000000 + ts.tv_nsec;
-#elif defined(OS_SOLARIS)
-    return gethrtime();
 #elif defined(__MACH__)
     clock_serv_t cclock;
     mach_timespec_t ts;
@@ -167,8 +238,9 @@ class PosixClock : public SystemClock {
     struct timespec ts;
     clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ts);
     return (static_cast<uint64_t>(ts.tv_sec) * 1000000000 + ts.tv_nsec) / 1000;
-#endif
+#else
     return 0;
+#endif
   }
 
   uint64_t CPUNanos() override {
@@ -177,8 +249,9 @@ class PosixClock : public SystemClock {
     struct timespec ts;
     clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ts);
     return static_cast<uint64_t>(ts.tv_sec) * 1000000000 + ts.tv_nsec;
-#endif
+#else
     return 0;
+#endif
   }
 
   void SleepForMicroseconds(int micros) override { usleep(micros); }
@@ -199,7 +272,7 @@ class PosixClock : public SystemClock {
     std::string dummy;
     dummy.reserve(maxsize);
     dummy.resize(maxsize);
-    char* p = &dummy[0];
+    char* p = dummy.data();
     port::LocalTimeR(&seconds, &t);
     snprintf(p, maxsize, "%04d/%02d/%02d-%02d:%02d:%02d ", t.tm_year + 1900,
              t.tm_mon + 1, t.tm_mday, t.tm_hour, t.tm_min, t.tm_sec);
@@ -213,13 +286,19 @@ class PosixEnv : public CompositeEnv {
   const char* Name() const override { return kClassName(); }
   const char* NickName() const override { return kDefaultName(); }
 
-  ~PosixEnv() override {
-    if (this == Env::Default()) {
-      for (const auto tid : threads_to_join_) {
+  struct JoinThreadsOnExit {
+    explicit JoinThreadsOnExit(PosixEnv& _deflt) : deflt(_deflt) {}
+    // No copying allowed
+    JoinThreadsOnExit(const JoinThreadsOnExit&) = delete;
+    JoinThreadsOnExit& operator=(const JoinThreadsOnExit&) = delete;
+    JoinThreadsOnExit(JoinThreadsOnExit&&) = delete;
+    JoinThreadsOnExit& operator=(JoinThreadsOnExit&&) = delete;
+    ~JoinThreadsOnExit() {
+      for (const auto tid : deflt.threads_to_join_) {
         pthread_join(tid, nullptr);
       }
       for (int pool_id = 0; pool_id < Env::Priority::TOTAL; ++pool_id) {
-        thread_pools_[pool_id].JoinAllThreads();
+        deflt.thread_pools_[pool_id].JoinAllThreads();
       }
       // Do not delete the thread_status_updater_ in order to avoid the
       // free after use when Env::Default() is destructed while some other
@@ -227,7 +306,8 @@ class PosixEnv : public CompositeEnv {
       // PosixEnv instances use the same thread_status_updater_, so never
       // explicitly delete it.
     }
-  }
+    PosixEnv& deflt;
+  };
 
   void SetFD_CLOEXEC(int fd, const EnvOptions* options) {
     if ((options == nullptr || options->set_fd_cloexec) && fd > 0) {
@@ -328,12 +408,16 @@ class PosixEnv : public CompositeEnv {
   }
 
   Status GetHostName(char* name, uint64_t len) override {
-    int ret = gethostname(name, static_cast<size_t>(len));
+    const size_t max_len = static_cast<size_t>(len);
+    int ret = gethostname(name, max_len);
     if (ret < 0) {
       if (errno == EFAULT || errno == EINVAL) {
         return Status::InvalidArgument(errnoStr(errno).c_str());
+      } else if (errno == ENAMETOOLONG) {
+        return IOError("GetHostName", std::string(name, strnlen(name, max_len)),
+                       errno);
       } else {
-        return IOError("GetHostName", name, errno);
+        return IOError("GetHostName", "", errno);
       }
     }
     return Status::OK();
@@ -457,7 +541,7 @@ struct StartThreadState {
 };
 
 static void* StartThreadWrapper(void* arg) {
-  StartThreadState* state = reinterpret_cast<StartThreadState*>(arg);
+  StartThreadState* state = static_cast<StartThreadState*>(arg);
   state->user_function(state->arg);
   delete state;
   return nullptr;
@@ -501,9 +585,11 @@ Env* Env::Default() {
   ThreadLocalPtr::InitSingletons();
   CompressionContextCache::InitSingleton();
   INIT_SYNC_POINT_SINGLETONS();
-  // ~PosixEnv must be called on exit
-  //**TODO: Can we make this a STATIC_AVOID_DESTRUCTION?
-  static PosixEnv default_env;
+  // Avoid problems with accessing most members of Env::Default() during
+  // static destruction.
+  STATIC_AVOID_DESTRUCTION(PosixEnv, default_env);
+  // This destructor must be called on exit
+  static PosixEnv::JoinThreadsOnExit thread_joiner(default_env);
   return &default_env;
 }
 
