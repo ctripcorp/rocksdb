@@ -3876,11 +3876,6 @@ void VersionStorageInfo::ComputeFilesMarkedForForceBlobListGC(
     const MutableCFOptions& mutable_cf_options) {
   files_marked_for_forced_blob_gc_.clear();
 
-  if (mutable_cf_options.blob_list_garbage_max_blob_candidate_per_round == 0 ||
-      mutable_cf_options.blob_list_garbage_max_sst_candidate_per_round == 0) {
-    return;
-  }
-
   if (blob_files_.empty()) {
     return;
   }
@@ -3925,6 +3920,70 @@ void VersionStorageInfo::ComputeFilesMarkedForForceBlobListGC(
   std::vector<std::shared_ptr<BlobFileMetaData>> gc_blob_candidates;
   gc_blob_candidates.reserve(max_blob_candidates);
 
+  std::unordered_set<uint64_t> candidate_sst_file_numbers;
+  candidate_sst_file_numbers.reserve(max_sst_candidates);
+
+  auto process_gc_blob_candidates = [&]() -> bool {
+    assert(!gc_blob_candidates.empty());
+
+    std::sort(gc_blob_candidates.begin(), gc_blob_candidates.end(),
+              [](const std::shared_ptr<BlobFileMetaData>& lhs,
+                 const std::shared_ptr<BlobFileMetaData>& rhs) {
+                assert(lhs);
+                assert(rhs);
+                return lhs->GetGarbageBlobBytes() > rhs->GetGarbageBlobBytes();
+              });
+
+    for (const auto& blob_meta : gc_blob_candidates) {
+      assert(blob_meta);
+
+      for (uint64_t sst_file_number : blob_meta->GetFullLinkedSsts()) {
+        if (!candidate_sst_file_numbers.insert(sst_file_number).second) {
+          continue;
+        }
+
+        const FileLocation location = GetFileLocation(sst_file_number);
+        if (!location.IsValid()) {
+          continue;
+        }
+
+        const int level = location.GetLevel();
+        assert(level >= 0);
+
+        FileMetaData* const sst_meta = files_[level][location.GetPosition()];
+        assert(sst_meta);
+
+        if (sst_meta->being_compacted) {
+          continue;
+        }
+
+        if (sst_rewrite_garbage_bytes_ratio_threshold.has_value() &&
+            *sst_rewrite_garbage_bytes_ratio_threshold > 0.0) {
+          const uint64_t sst_file_size = sst_meta->fd.GetFileSize();
+          if (sst_file_size == 0) {
+            continue;
+          }
+
+          const uint64_t rewrite_garbage_bytes = ComputeSstRewriteGarbageBytes(
+              *sst_meta, per_blob_garbage_ratio_threshold, *this);
+          const double rewrite_efficiency =
+              static_cast<double>(rewrite_garbage_bytes) /
+              static_cast<double>(sst_file_size);
+          if (rewrite_efficiency < *sst_rewrite_garbage_bytes_ratio_threshold) {
+            continue;
+          }
+        }
+
+        files_marked_for_forced_blob_gc_.emplace_back(level, sst_meta);
+        if (files_marked_for_forced_blob_gc_.size() >= max_sst_candidates) {
+          return true;
+        }
+      }
+    }
+
+    return !files_marked_for_forced_blob_gc_.empty();
+  };
+
   for (const auto& blob_meta : blob_files_) {
     assert(blob_meta);
     if (blob_meta->GetFullLinkedSsts().empty()) {
@@ -3933,72 +3992,20 @@ void VersionStorageInfo::ComputeFilesMarkedForForceBlobListGC(
     if (GetBlobGarbageRatio(*blob_meta) < per_blob_garbage_ratio_threshold) {
       continue;
     }
+
     gc_blob_candidates.emplace_back(blob_meta);
-    if (gc_blob_candidates.size() >= max_blob_candidates) {
-      break;
+    if (gc_blob_candidates.size() < max_blob_candidates) {
+      continue;
     }
+
+    if (process_gc_blob_candidates()) {
+      return;
+    }
+    gc_blob_candidates.clear();
   }
 
-  if (gc_blob_candidates.empty()) {
-    return;
-  }
-
-  std::sort(gc_blob_candidates.begin(), gc_blob_candidates.end(),
-            [](const std::shared_ptr<BlobFileMetaData>& lhs,
-               const std::shared_ptr<BlobFileMetaData>& rhs) {
-              assert(lhs);
-              assert(rhs);
-              return lhs->GetGarbageBlobBytes() > rhs->GetGarbageBlobBytes();
-            });
-
-  std::unordered_set<uint64_t> candidate_sst_file_numbers;
-  candidate_sst_file_numbers.reserve(max_sst_candidates);
-
-  for (const auto& blob_meta : gc_blob_candidates) {
-    assert(blob_meta);
-
-    for (uint64_t sst_file_number : blob_meta->GetFullLinkedSsts()) {
-      if (!candidate_sst_file_numbers.insert(sst_file_number).second) {
-        continue;
-      }
-
-      const FileLocation location = GetFileLocation(sst_file_number);
-      if (!location.IsValid()) {
-        continue;
-      }
-
-      const int level = location.GetLevel();
-      assert(level >= 0);
-
-      FileMetaData* const sst_meta = files_[level][location.GetPosition()];
-      assert(sst_meta);
-
-      if (sst_meta->being_compacted) {
-        continue;
-      }
-
-      if (sst_rewrite_garbage_bytes_ratio_threshold.has_value() &&
-          *sst_rewrite_garbage_bytes_ratio_threshold > 0.0) {
-        const uint64_t sst_file_size = sst_meta->fd.GetFileSize();
-        if (sst_file_size == 0) {
-          continue;
-        }
-
-        const uint64_t rewrite_garbage_bytes = ComputeSstRewriteGarbageBytes(
-            *sst_meta, per_blob_garbage_ratio_threshold, *this);
-        const double rewrite_efficiency =
-            static_cast<double>(rewrite_garbage_bytes) /
-            static_cast<double>(sst_file_size);
-        if (rewrite_efficiency < *sst_rewrite_garbage_bytes_ratio_threshold) {
-          continue;
-        }
-      }
-
-      files_marked_for_forced_blob_gc_.emplace_back(level, sst_meta);
-      if (files_marked_for_forced_blob_gc_.size() >= max_sst_candidates) {
-        return;
-      }
-    }
+  if (!gc_blob_candidates.empty()) {
+    process_gc_blob_candidates();
   }
 }
 

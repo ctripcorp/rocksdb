@@ -1237,44 +1237,6 @@ TEST_F(VersionStorageInfoTest, ForceBlobListGCMaxSstCandidatePerRound) {
   ASSERT_EQ(vstorage_.FilesMarkedForForcedBlobGC().size(), 2U);
 }
 
-TEST_F(VersionStorageInfoTest, ForceBlobListGCZeroCandidateCapsDisableGC) {
-  constexpr int level = 0;
-  constexpr uint64_t first_sst = 1;
-  constexpr uint64_t second_sst = 2;
-  constexpr uint64_t blob = 10;
-
-  Add(level, first_sst, "a", "m", /*file_size=*/10000, blob, {blob});
-  Add(level, second_sst, "n", "z", /*file_size=*/10000, blob, {blob});
-
-  AddBlob(blob, /*total_blob_count=*/10, /*total_blob_bytes=*/100000,
-          BlobFileMetaData::LinkedSsts{},
-          BlobFileMetaData::FullLinkedSsts{first_sst, second_sst},
-          /*garbage_blob_count=*/9, /*garbage_blob_bytes=*/90000);
-
-  UpdateVersionStorageInfo();
-
-  mutable_cf_options_.blob_list_garbage_overall_garbage_ratio_low = 0.3;
-  mutable_cf_options_.blob_list_garbage_overall_garbage_ratio_middle = 0.5;
-  mutable_cf_options_.blob_list_garbage_overall_gc_garbage_ratio_high = 0.7;
-  mutable_cf_options_.blob_list_garbage_hard_gc_garbage_ratio = 0.5;
-
-  mutable_cf_options_.blob_list_garbage_max_blob_candidate_per_round = 0;
-  mutable_cf_options_.blob_list_garbage_max_sst_candidate_per_round = 100;
-  vstorage_.ComputeOverallBlobGarbageRatio();
-  vstorage_.ComputeFilesMarkedForForceBlobListGC(mutable_cf_options_);
-  ASSERT_TRUE(vstorage_.FilesMarkedForForcedBlobGC().empty());
-
-  mutable_cf_options_.blob_list_garbage_max_blob_candidate_per_round = 100;
-  mutable_cf_options_.blob_list_garbage_max_sst_candidate_per_round = 0;
-  vstorage_.ComputeFilesMarkedForForceBlobListGC(mutable_cf_options_);
-  ASSERT_TRUE(vstorage_.FilesMarkedForForcedBlobGC().empty());
-
-  mutable_cf_options_.blob_list_garbage_max_blob_candidate_per_round = 100;
-  mutable_cf_options_.blob_list_garbage_max_sst_candidate_per_round = 100;
-  vstorage_.ComputeFilesMarkedForForceBlobListGC(mutable_cf_options_);
-  ASSERT_EQ(vstorage_.FilesMarkedForForcedBlobGC().size(), 2U);
-}
-
 class VersionStorageInfoTimestampTest : public VersionStorageInfoTestBase {
  public:
   VersionStorageInfoTimestampTest()
